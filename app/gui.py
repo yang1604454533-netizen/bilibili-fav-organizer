@@ -29,6 +29,34 @@ ctk.set_default_color_theme("blue")
 
 APP_TITLE = "B站收藏夹整理助手"
 
+# 主题色板：浅色整体蓝调，深色整体粉调
+THEME_PALETTES = {
+    "light": {  # 浅色 → 蓝色系
+        "primary": "#2E86DE",       # 主按钮/强调：蓝
+        "primary_hover": "#2571BE",
+        "secondary": "#A8D4F5",     # 次按钮：浅蓝
+        "secondary_hover": "#8EC3EE",
+        "accent": "#2E86DE",        # 选中高亮/链接
+        "bg": "#EAF3FB",            # 主窗口背景：淡蓝
+        "text": "#1E3A5F",          # 正文：深蓝
+        "muted": "#6B8CB4",         # 次要文字
+        "hover": "#D3E6F8",         # 列表悬停
+        "selected_text": "#FFFFFF",
+    },
+    "dark": {   # 深色 → 粉色系
+        "primary": "#FF6B9D",       # 主按钮/强调：粉
+        "primary_hover": "#E85A8C",
+        "secondary": "#5E2A3E",     # 次按钮：暗粉
+        "secondary_hover": "#6E3448",
+        "accent": "#FF6B9D",
+        "bg": "#2A1219",            # 主窗口背景：暗粉黑
+        "text": "#FFD6E4",          # 正文：浅粉
+        "muted": "#C98A9D",         # 次要文字
+        "hover": "#4A2430",         # 列表悬停
+        "selected_text": "#FFFFFF",
+    },
+}
+
 
 class FavOrganizerApp(ctk.CTk):
     def __init__(self) -> None:
@@ -105,11 +133,33 @@ class FavOrganizerApp(ctk.CTk):
         self._update_theme_button()
         # 重渲染收藏夹列表以应用主题色（system 模式下实际模式可能变化）
         self._render_folders(self._current_folders if self._current_folders else [])
+        # 刷新全局配色：主窗口背景 + 顶栏按钮
+        self.configure(fg_color=self.pc("bg"))
+        for btn in (self.btn_qr, self.btn_cookie, self.btn_settings, self.btn_theme, self.btn_help):
+            if btn is self.btn_qr:
+                btn.configure(fg_color=self.pc("primary"), hover_color=self.pc("primary_hover"))
+            else:
+                btn.configure(fg_color=self.pc("secondary"), hover_color=self.pc("secondary_hover"),
+                              text_color=self.pc("text"))
+        self.btn_refresh.configure(fg_color=self.pc("primary"), hover_color=self.pc("primary_hover"))
+        self.btn_load.configure(fg_color=self.pc("primary"), hover_color=self.pc("primary_hover"))
+        self.btn_category.configure(fg_color=self.pc("primary"), hover_color=self.pc("primary_hover"))
+        self.btn_export.configure(fg_color=self.pc("secondary"), hover_color=self.pc("secondary_hover"),
+                                  text_color=self.pc("text"))
         self._log(f"已切换主题：{self._theme_label(nxt)}")
 
     @staticmethod
     def _theme_label(mode: str) -> str:
         return {"light": "浅色", "dark": "深色", "system": "跟随系统"}.get(mode, mode)
+
+    def palette(self) -> dict:
+        """返回当前主题的色板（浅色=蓝调，深色=粉调）。"""
+        try:
+            actual = ctk.get_appearance_mode()  # 'Light' / 'Dark'
+            is_dark = actual == "Dark"
+        except Exception:  # noqa: BLE001
+            is_dark = self.appearance_mode != "light"
+        return THEME_PALETTES["dark" if is_dark else "light"]
 
     def theme_color(self, dark: str, light: str) -> str:
         """返回当前主题下的颜色：深色主题用 dark，浅色主题用 light。
@@ -124,6 +174,10 @@ class FavOrganizerApp(ctk.CTk):
             is_dark = self.appearance_mode != "light"
         return dark if is_dark else light
 
+    def pc(self, key: str) -> str:
+        """palette color 简写：从当前主题色板取色。"""
+        return self.palette().get(key, "#ffffff")
+
     # ------------------------------------------------------------------ #
     # UI 构建                                                            #
     # ------------------------------------------------------------------ #
@@ -131,7 +185,7 @@ class FavOrganizerApp(ctk.CTk):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
         # 主窗口背景与主题一致，避免黑色边框
-        self.configure(fg_color=self.theme_color("#1a1a1a", "#f0f0f0"))
+        self.configure(fg_color=self.pc("bg"))
 
         # 统一框架样式：无边框、圆角、与主窗口背景一致
         frame_cfg = {"corner_radius": 10, "border_width": 0}
@@ -142,35 +196,39 @@ class FavOrganizerApp(ctk.CTk):
         top.grid_columnconfigure(0, weight=1)
 
         self.login_status = ctk.CTkLabel(top, text="未登录",
-                                         text_color=self.theme_color("#888888", "#666666"),
+                                         text_color=self.pc("muted"),
                                          font=("Microsoft YaHei UI", 12))
         self.login_status.grid(row=0, column=0, sticky="w", padx=12, pady=8)
 
         self.btn_qr = ctk.CTkButton(top, text="扫码登录", width=96,
-                                    fg_color="#fb7299", hover_color="#e8618c",
+                                    fg_color=self.pc("primary"), hover_color=self.pc("primary_hover"),
                                     command=self._start_qr_login)
         self.btn_qr.grid(row=0, column=1, padx=4, pady=8)
         self.btn_cookie = ctk.CTkButton(top, text="粘贴Cookie", width=96,
-                                        fg_color=self.theme_color("#444444", "#d9d9d9"),
-                                        hover_color=self.theme_color("#555555", "#c7c7c7"),
+                                        fg_color=self.pc("secondary"),
+                                        hover_color=self.pc("secondary_hover"),
+                                        text_color=self.pc("text"),
                                         command=self._cookie_login_dialog)
         self.btn_cookie.grid(row=0, column=2, padx=4, pady=8)
         self.btn_settings = ctk.CTkButton(top, text="AI设置", width=96,
-                                          fg_color=self.theme_color("#444444", "#d9d9d9"),
-                                          hover_color=self.theme_color("#555555", "#c7c7c7"),
+                                          fg_color=self.pc("secondary"),
+                                          hover_color=self.pc("secondary_hover"),
+                                          text_color=self.pc("text"),
                                           command=self._open_settings)
         self.btn_settings.grid(row=0, column=3, padx=4, pady=8)
         # 主题切换按钮（浅色/深色/跟随系统）
         self.btn_theme = ctk.CTkButton(top, text="", width=96,
-                                       fg_color=self.theme_color("#444444", "#d9d9d9"),
-                                       hover_color=self.theme_color("#555555", "#c7c7c7"),
+                                       fg_color=self.pc("secondary"),
+                                       hover_color=self.pc("secondary_hover"),
+                                       text_color=self.pc("text"),
                                        command=self._toggle_theme)
         self.btn_theme.grid(row=0, column=4, padx=4, pady=8)
         self._update_theme_button()
         # 使用说明按钮
         self.btn_help = ctk.CTkButton(top, text="使用说明", width=96,
-                                      fg_color=self.theme_color("#444444", "#d9d9d9"),
-                                      hover_color=self.theme_color("#555555", "#c7c7c7"),
+                                      fg_color=self.pc("secondary"),
+                                      hover_color=self.pc("secondary_hover"),
+                                      text_color=self.pc("text"),
                                       command=self._show_help)
         self.btn_help.grid(row=0, column=5, padx=4, pady=8)
 
@@ -185,7 +243,8 @@ class FavOrganizerApp(ctk.CTk):
         left = ctk.CTkFrame(middle, **frame_cfg)
         left.grid(row=0, column=0, sticky="nsw", padx=(0, 8))
         left.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(left, text="我的收藏夹").grid(row=0, column=0, sticky="w", padx=8, pady=(8, 2))
+        ctk.CTkLabel(left, text="我的收藏夹",
+                     text_color=self.pc("text")).grid(row=0, column=0, sticky="w", padx=8, pady=(8, 2))
         self.folder_scroll = ctk.CTkScrollableFrame(left, width=300, height=380)
         self.folder_scroll.grid(row=1, column=0, sticky="nsew", padx=8)
         self.folder_buttons: list[ctk.CTkButton] = []
@@ -194,11 +253,11 @@ class FavOrganizerApp(ctk.CTk):
         btnrow.grid(row=2, column=0, sticky="ew", padx=8, pady=6)
         btnrow.grid_columnconfigure(0, weight=1)
         self.btn_refresh = ctk.CTkButton(btnrow, text="刷新列表",
-                                         fg_color="#fb7299", hover_color="#e8618c",
+                                         fg_color=self.pc("primary"), hover_color=self.pc("primary_hover"),
                                          command=self._refresh_folders)
         self.btn_refresh.grid(row=0, column=0, padx=(0, 4))
         self.btn_load = ctk.CTkButton(btnrow, text="加载收藏夹视频",
-                                      fg_color="#fb7299", hover_color="#e8618c",
+                                      fg_color=self.pc("primary"), hover_color=self.pc("primary_hover"),
                                       command=self._load_selected_videos)
         self.btn_load.grid(row=0, column=1)
 
@@ -207,21 +266,23 @@ class FavOrganizerApp(ctk.CTk):
         right.grid(row=0, column=1, sticky="nsew")
         right.grid_columnconfigure(0, weight=1)
         right.grid_rowconfigure(1, weight=1)
-        ctk.CTkLabel(right, text="收藏的视频（选择后点下方按钮分类导出）").grid(row=0, column=0, sticky="w", padx=8, pady=(8, 2))
+        ctk.CTkLabel(right, text="收藏的视频（选择后点下方按钮分类导出）",
+                     text_color=self.pc("text")).grid(row=0, column=0, sticky="w", padx=8, pady=(8, 2))
         self.video_listbox = ctk.CTkTextbox(right, state="disabled", font=("Microsoft YaHei UI", 13), wrap="none")
         self.video_listbox.grid(row=1, column=0, sticky="nsew", padx=8)
-        self.video_listbox.tag_config("sel", background="#fb7299", foreground="#ffffff")
+        self.video_listbox.tag_config("sel", background=self.pc("accent"), foreground=self.pc("selected_text"))
 
         vbtn = ctk.CTkFrame(right, **frame_cfg)
         vbtn.grid(row=2, column=0, sticky="ew", padx=8, pady=6)
         vbtn.grid_columnconfigure(0, weight=1)
         self.btn_category = ctk.CTkButton(vbtn, text="AI 分类并导出", width=160,
-                                          fg_color="#fb7299", hover_color="#e8618c",
+                                          fg_color=self.pc("primary"), hover_color=self.pc("primary_hover"),
                                           command=self._run_ai_classify)
         self.btn_category.grid(row=0, column=0, padx=4)
         self.btn_export = ctk.CTkButton(vbtn, text="导出当前结果", width=120,
-                                        fg_color=self.theme_color("#444444", "#d9d9d9"),
-                                        hover_color=self.theme_color("#555555", "#c7c7c7"),
+                                        fg_color=self.pc("secondary"),
+                                        hover_color=self.pc("secondary_hover"),
+                                        text_color=self.pc("text"),
                                         command=self._export_only)
         self.btn_export.grid(row=0, column=1, padx=4)
         self.lbl_video_count = ctk.CTkLabel(vbtn, text="共 0 条")
@@ -415,7 +476,7 @@ class FavOrganizerApp(ctk.CTk):
         tip = ctk.CTkLabel(dlg, text=(
             "请从浏览器登录 bilibili.com 后，复制当前页面的 Cookie 粘贴到下面：\n"
             "（在浏览器按 F12 → 网络 → 刷新页面 → 点击任意请求 → 请求头里复制 Cookie 整行）"),
-            justify="left", wraplength=520, text_color=self.theme_color("#aaaaaa", "#666666"))
+            justify="left", wraplength=520, text_color=self.pc("muted"))
         tip.pack(padx=16, pady=(14, 8), anchor="w")
         self.cookie_entry = ctk.CTkTextbox(dlg, height=130, wrap="word")
         self.cookie_entry.pack(padx=16, pady=6, fill="both", expand=True)
@@ -438,8 +499,9 @@ class FavOrganizerApp(ctk.CTk):
         row = ctk.CTkFrame(dlg)
         row.pack(padx=16, pady=12, fill="x")
         ctk.CTkButton(row, text="登录", command=_submit).pack(side="left", padx=4)
-        ctk.CTkButton(row, text="取消", fg_color=self.theme_color("#444444", "#d9d9d9"),
-                      hover_color=self.theme_color("#555555", "#c7c7c7"), command=dlg.destroy).pack(side="left", padx=4)
+        ctk.CTkButton(row, text="取消", fg_color=self.pc("secondary"),
+                      hover_color=self.pc("secondary_hover"), text_color=self.pc("text"),
+                      command=dlg.destroy).pack(side="left", padx=4)
 
     def _update_login_status(self) -> None:
         if self.client.is_logged_in:
@@ -503,7 +565,7 @@ class FavOrganizerApp(ctk.CTk):
         self.folder_buttons.clear()
         if not folders:
             ctk.CTkLabel(self.folder_scroll, text="（暂无收藏夹或未登录）",
-                         text_color=self.theme_color("#888888", "#666666")).pack(fill="x", padx=4, pady=8)
+                         text_color=self.pc("muted")).pack(fill="x", padx=4, pady=8)
             return
         for i, f in enumerate(folders):
             priv = " 🔒" if f.is_private else ""
@@ -511,8 +573,8 @@ class FavOrganizerApp(ctk.CTk):
             btn = ctk.CTkButton(
                 self.folder_scroll, text=line, anchor="w",
                 height=32, fg_color="transparent",
-                hover_color=self.theme_color("#2f2f2f", "#e2e2e2"),
-                text_color=self.theme_color("#dddddd", "#333333"), corner_radius=6,
+                hover_color=self.pc("hover"),
+                text_color=self.pc("text"), corner_radius=6,
                 command=lambda idx=i: self._select_folder(idx),
             )
             btn.pack(fill="x", padx=2, pady=1)
@@ -524,11 +586,11 @@ class FavOrganizerApp(ctk.CTk):
         self.selected_folder_idx = idx
         for i, btn in enumerate(self.folder_buttons):
             if i == idx:
-                btn.configure(fg_color="#fb7299", hover_color="#fb7299",
-                              text_color="#ffffff")
+                btn.configure(fg_color=self.pc("accent"), hover_color=self.pc("accent"),
+                              text_color=self.pc("selected_text"))
             else:
-                btn.configure(fg_color="transparent", hover_color=self.theme_color("#2f2f2f", "#e2e2e2"),
-                              text_color=self.theme_color("#dddddd", "#333333"))
+                btn.configure(fg_color="transparent", hover_color=self.pc("hover"),
+                              text_color=self.pc("text"))
 
     def _selected_folder_index(self) -> int | None:
         """返回当前选中的收藏夹索引；无选中返回 None。"""
@@ -626,13 +688,13 @@ class FavOrganizerApp(ctk.CTk):
         for title, desc in steps:
             ctk.CTkLabel(box, text=title, anchor="w",
                          font=("Microsoft YaHei UI", 14, "bold"),
-                         text_color="#fb7299").pack(fill="x", pady=(8, 0))
+                         text_color=self.pc("accent")).pack(fill="x", pady=(8, 0))
             ctk.CTkLabel(box, text=desc, anchor="w", justify="left",
                          font=("Microsoft YaHei UI", 12),
-                         text_color=self.theme_color("#cccccc", "#444444"),
+                         text_color=self.pc("text"),
                          wraplength=500).pack(fill="x", pady=(2, 0))
         ctk.CTkButton(dlg, text="知道了", width=120,
-                      fg_color="#fb7299", hover_color="#e8618c",
+                      fg_color=self.pc("primary"), hover_color=self.pc("primary_hover"),
                       command=dlg.destroy).pack(pady=12)
 
     def _pick_export_dir(self) -> Path | None:
@@ -698,7 +760,7 @@ class FavOrganizerApp(ctk.CTk):
         dlg.resizable(False, False)
         dlg.grab_set()
 
-        ctk.CTkLabel(dlg, text="接入方式：DeepSeek 官方 / 自定义 OpenAI 兼容 API", text_color=self.theme_color("#aaaaaa", "#666666")
+        ctk.CTkLabel(dlg, text="接入方式：DeepSeek 官方 / 自定义 OpenAI 兼容 API", text_color=self.pc("muted")
                      ).pack(anchor="w", padx=20, pady=(14, 2))
 
         def field(parent, label, default, show=None):
@@ -718,7 +780,7 @@ class FavOrganizerApp(ctk.CTk):
         e_temp = field(dlg, "temperature (0-1)", self.ai_config.temperature)
         e_token = field(dlg, "max_tokens", self.ai_config.max_tokens)
 
-        ctk.CTkLabel(dlg, text="分类列表（每行一个，可增删改）：", text_color=self.theme_color("#aaaaaa", "#666666")
+        ctk.CTkLabel(dlg, text="分类列表（每行一个，可增删改）：", text_color=self.pc("muted")
                      ).pack(anchor="w", padx=20, pady=(10, 2))
         e_cats = ctk.CTkTextbox(dlg, height=160, wrap="word")
         e_cats.pack(fill="x", padx=20)
@@ -752,8 +814,9 @@ class FavOrganizerApp(ctk.CTk):
         row = ctk.CTkFrame(dlg, fg_color="transparent")
         row.pack(fill="x", padx=20, pady=14)
         ctk.CTkButton(row, text="保存", command=_save).pack(side="left", padx=4)
-        ctk.CTkButton(row, text="取消", fg_color=self.theme_color("#444444", "#d9d9d9"),
-                      hover_color=self.theme_color("#555555", "#c7c7c7"), command=dlg.destroy).pack(side="left", padx=4)
+        ctk.CTkButton(row, text="取消", fg_color=self.pc("secondary"),
+                      hover_color=self.pc("secondary_hover"), text_color=self.pc("text"),
+                      command=dlg.destroy).pack(side="left", padx=4)
 
     # ------------------------------------------------------------------ #
     # 收尾                                                                #
