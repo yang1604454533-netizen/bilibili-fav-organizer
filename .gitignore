@@ -1,0 +1,14 @@
+# 虚拟环境 / 缓存
+.venv/
+venv/
+.venv312/
+__pycache__/
+*.pyc
+_pyinstaller/
+build/
+dist/
+*.spec
+
+# 导出的临时文件
+_qr_tmp.png
+导出测试/

@@ -1,0 +1,6 @@
+requests>=2.31.0
+customtkinter>=5.2.2
+Pillow>=10.0.0
+qrcode>=7.4.2
+openpyxl>=3.1.0
+# 打包用：pyinstaller>=6.0（开发期安装即可，不需要打包进 exe）
