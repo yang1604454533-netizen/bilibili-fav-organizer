@@ -14,4 +14,4 @@ config.json
 
 # 导出的临时文件
 _qr_tmp.png
-导出测试/
+导出测试/gh_tree.json
