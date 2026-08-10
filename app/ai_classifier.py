@@ -232,7 +232,8 @@ class AIClassifier:
                 data = resp.json()
                 content = (data["choices"][0]["message"]["content"] or "").strip()
                 if not content:
-                    raise RuntimeError("模型返回空内容")
+                    # 推理模型偶发：reasoning 占满输出导致 content 为空，属可自愈情况
+                    raise RuntimeError("模型偶发未输出正文，自动重试")
                 # 截断检测：期待 JSON 但输出未闭合 → 增大 max_tokens 重试
                 if self._looks_truncated(content):
                     self._log(f"返回内容疑似被 max_tokens 截断（长度 {len(content)}），增大到 {max_tokens * 2} 重试")
@@ -243,7 +244,7 @@ class AIClassifier:
                 last_exc = exc
                 if attempt < retries:
                     time_wait = 1.5 * (attempt + 1)
-                    self._log(f"请求失败({exc})，{time_wait:.1f}s 后重试...")
+                    self._log(f"请求未成功（{exc}），{time_wait:.1f}s 后自动重试...")
                     threading.Event().wait(time_wait)
         raise RuntimeError(f"AI 请求多次失败：{last_exc}")
 

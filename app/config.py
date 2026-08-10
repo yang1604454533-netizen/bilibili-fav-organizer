@@ -50,6 +50,13 @@ def load_config() -> dict:
             for k in cfg:
                 if k in saved:
                     cfg[k] = saved[k]
+            # 配置迁移：旧版 max_tokens 过小（2000）会导致推理模型
+            # reasoning 占用后 JSON 截断/空内容，强制提升到安全值
+            try:
+                if int(cfg.get("max_tokens", 0)) < 3000:
+                    cfg["max_tokens"] = 4000
+            except (TypeError, ValueError):
+                cfg["max_tokens"] = 4000
     except (OSError, ValueError) as exc:
         print(f"[config] 读取配置失败，使用默认值：{exc}")
     return cfg
