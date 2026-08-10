@@ -1,0 +1,110 @@
+{
+  "sha": "832a44122961b6773240f9ee0d3afc6890dcfe56",
+  "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/trees/832a44122961b6773240f9ee0d3afc6890dcfe56",
+  "tree": [
+    {
+      "path": ".gitignore",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7806af47c29264721eadcb0a2d62daff9d6094f9",
+      "size": 150,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/7806af47c29264721eadcb0a2d62daff9d6094f9"
+    },
+    {
+      "path": "README.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "cde31fc8b82de923756aff0e6b88710df95a503f",
+      "size": 3326,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/cde31fc8b82de923756aff0e6b88710df95a503f"
+    },
+    {
+      "path": "app",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "41ca27fb9d1f116d1d9819ba7acdc6e60d9397ed",
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/trees/41ca27fb9d1f116d1d9819ba7acdc6e60d9397ed"
+    },
+    {
+      "path": "app/__init__.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b1a53197f8aa3b8ebc82f2f7f72d3102ae91b8b2",
+      "size": 66,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/b1a53197f8aa3b8ebc82f2f7f72d3102ae91b8b2"
+    },
+    {
+      "path": "app/ai_classifier.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4180e623bb9ef2b1bd1dc7ec9150d1136376d7ee",
+      "size": 15070,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/4180e623bb9ef2b1bd1dc7ec9150d1136376d7ee"
+    },
+    {
+      "path": "app/bilibili.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "fb772c6447d0ca594e1dfdca0dc0f7eb1999651c",
+      "size": 12350,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/fb772c6447d0ca594e1dfdca0dc0f7eb1999651c"
+    },
+    {
+      "path": "app/config.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e6117c05acca04d7d424933fea27f4f03769641a",
+      "size": 2405,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/e6117c05acca04d7d424933fea27f4f03769641a"
+    },
+    {
+      "path": "app/exporter.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "cbadea9543b850fe490824d1c1c92e3d37f3b81e",
+      "size": 11037,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/cbadea9543b850fe490824d1c1c92e3d37f3b81e"
+    },
+    {
+      "path": "app/gui.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4d3fedc2a4bfb3a6b3403b112cacc9071ec9323a",
+      "size": 40488,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/4d3fedc2a4bfb3a6b3403b112cacc9071ec9323a"
+    },
+    {
+      "path": "build.bat",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1e9795661e4a2dc3af2d0e6355a55f7020306465",
+      "size": 1286,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/1e9795661e4a2dc3af2d0e6355a55f7020306465"
+    },
+    {
+      "path": "main.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f77ad39361d4d1f96f84292a2ca8e13a687822aa",
+      "size": 355,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/f77ad39361d4d1f96f84292a2ca8e13a687822aa"
+    },
+    {
+      "path": "requirements.txt",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "883df42b50548b93c9aee437dbb667d02c6df401",
+      "size": 165,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/883df42b50548b93c9aee437dbb667d02c6df401"
+    },
+    {
+      "path": "smoke_test.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9e67c4d48975bb5135f01f292306ba16de6480a4",
+      "size": 10162,
+      "url": "https://api.github.com/repos/yang1604454533-netizen/bilibili-fav-organizer/git/blobs/9e67c4d48975bb5135f01f292306ba16de6480a4"
+    }
+  ],
+  "truncated": false
+}

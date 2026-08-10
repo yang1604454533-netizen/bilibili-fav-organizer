@@ -756,7 +756,7 @@ class FavOrganizerApp(ctk.CTk):
     def _open_settings(self) -> None:
         dlg = ctk.CTkToplevel(self)
         dlg.title("AI 设置")
-        dlg.geometry("620x560")
+        dlg.geometry("620x400")
         dlg.resizable(False, False)
         dlg.grab_set()
 
@@ -780,12 +780,6 @@ class FavOrganizerApp(ctk.CTk):
         e_temp = field(dlg, "temperature (0-1)", self.ai_config.temperature)
         e_token = field(dlg, "max_tokens", self.ai_config.max_tokens)
 
-        ctk.CTkLabel(dlg, text="分类列表（每行一个，可增删改）：", text_color=self.pc("muted")
-                     ).pack(anchor="w", padx=20, pady=(10, 2))
-        e_cats = ctk.CTkTextbox(dlg, height=160, wrap="word")
-        e_cats.pack(fill="x", padx=20)
-        e_cats.insert("1.0", "\n".join(self.ai_config.categories))
-
         def _save():
             try:
                 base = e_base.get().strip()
@@ -793,9 +787,6 @@ class FavOrganizerApp(ctk.CTk):
                 model = e_model.get().strip()
                 temp = float(e_temp.get().strip() or 0.2)
                 token = int(e_token.get().strip() or 2000)
-                cats = [c.strip() for c in e_cats.get("1.0", "end").splitlines() if c.strip()]
-                if not cats:
-                    cats = ["其他"]
                 if not base or not model:
                     self._show_error_dialog("API 地址与模型名不能为空")
                     return
@@ -804,7 +795,7 @@ class FavOrganizerApp(ctk.CTk):
                 return
             self.cfg.update({
                 "base_url": base, "api_key": key, "model": model,
-                "temperature": temp, "max_tokens": token, "categories": cats,
+                "temperature": temp, "max_tokens": token,
             })
             appconfig.save_config(self.cfg)
             self.ai_config = self._build_ai_config()
