@@ -385,13 +385,17 @@ class BiliClient:
             raise BilibiliError("缺少 bili_jct，无法执行写操作（请重新扫码登录）")
         # 第一步：加入目标收藏夹
         self._post("https://api.bilibili.com/x/v3/fav/resource/deal",
-                   data={"rid": aid, "type": 2, "add_media_ids": add_media_id,
-                         "del_media_ids": ""})
+                   data={"rid": aid, "type": 2, "add_media_ids": add_media_id})
         # 第二步：从原收藏夹移除（间隔限流由 request_delay 保证）
         if del_media_id:
-            self._post("https://api.bilibili.com/x/v3/fav/resource/deal",
-                       data={"rid": aid, "type": 2, "add_media_ids": "",
-                             "del_media_ids": del_media_id})
+            try:
+                self._post("https://api.bilibili.com/x/v3/fav/resource/deal",
+                           data={"rid": aid, "type": 2, "del_media_ids": del_media_id})
+            except BilibiliError as exc:
+                # 加入成功但删除失败：明确提示（否则表现为"复制"）
+                raise BilibiliError(
+                    f"已加入目标夹但未能从原夹移除（aid={aid}）：{exc}",
+                    is_risk=getattr(exc, "is_risk", False)) from exc
 
     def apply_classification(self, videos: list[dict],
                              categorized: dict[str, list[dict]],
