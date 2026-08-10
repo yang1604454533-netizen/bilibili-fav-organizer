@@ -26,6 +26,10 @@ QR_EXPIRED = 86038       # 二维码失效
 class BilibiliError(Exception):
     """B站 API 业务错误。"""
 
+    def __init__(self, message: str, is_risk: bool = False):
+        super().__init__(message)
+        self.is_risk = is_risk  # True = 风控/限流类错误（412 等）
+
 
 @dataclass
 class FavoriteFolder:
@@ -146,13 +150,15 @@ class BiliClient:
         headers = dict(kwargs.pop("headers", {}))
         headers.setdefault("Referer", "https://www.bilibili.com/video/")
         resp = self._session.post(url, data=body, headers=headers, **kwargs)
+        resp_text = resp.text[:300]
         try:
             resp_data = resp.json()
         except ValueError as exc:
             if resp.status_code == 412:
                 raise BilibiliError(
-                    "B站风控拦截(412)：操作过于频繁。请放慢节奏或稍后重试，"
-                    "建议每次整理间隔几分钟") from exc
+                    "B站风控拦截(412)：操作过于频繁，账号可能已进入风控冷却期。"
+                    f"建议等待 30 分钟以上再试。响应详情：{resp_text[:120]}",
+                    is_risk=True) from exc
             raise BilibiliError(f"接口返回非 JSON：{url} ({resp.status_code})") from exc
         if resp_data.get("code", 0) != 0:
             raise BilibiliError(
@@ -414,11 +420,14 @@ class BiliClient:
             except BilibiliError as exc:
                 self._log(f"创建分类夹「{cat}」失败：{exc}，跳过该分类")
 
-        # 2) 逐个移动视频（慢速限流）
+        # 2) 逐个移动视频（慢速限流；遇风控立即停止）
         total = sum(len(items) for items in categorized.values())
         done = 0
         moved: dict[str, int] = {}
+        risk_hit = False
         for cat, items in categorized.items():
+            if risk_hit:
+                break
             if not items or cat not in folder_ids:
                 continue
             target_id = folder_ids[cat]
@@ -435,6 +444,12 @@ class BiliClient:
                     ok += 1
                 except BilibiliError as exc:
                     self._log(f"移动 {v.get('title', '')[:20]} 失败：{exc}")
+                    if getattr(exc, "is_risk", False):
+                        # 风控：立即停止后续移动，避免加重风控
+                        self._log("检测到风控拦截，已停止后续移动。"
+                                  "请等待 30 分钟以上冷却后再重新整理。")
+                        risk_hit = True
+                        break
                 done += 1
                 if progress_cb:
                     progress_cb(done, total)
