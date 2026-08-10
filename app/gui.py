@@ -130,16 +130,25 @@ class FavOrganizerApp(ctk.CTk):
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
+        # 主窗口背景与主题一致，避免黑色边框
+        self.configure(fg_color=self.theme_color("#1a1a1a", "#f0f0f0"))
+
+        # 统一框架样式：无边框、圆角、与主窗口背景一致
+        frame_cfg = {"corner_radius": 10, "border_width": 0}
 
         # ---- 顶栏：登录状态 + 操作按钮 ----
-        top = ctk.CTkFrame(self)
+        top = ctk.CTkFrame(self, **frame_cfg)
         top.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
         top.grid_columnconfigure(0, weight=1)
 
-        self.login_status = ctk.CTkLabel(top, text="未登录", text_color="#888888")
+        self.login_status = ctk.CTkLabel(top, text="未登录",
+                                         text_color=self.theme_color("#888888", "#666666"),
+                                         font=("Microsoft YaHei UI", 12))
         self.login_status.grid(row=0, column=0, sticky="w", padx=12, pady=8)
 
-        self.btn_qr = ctk.CTkButton(top, text="扫码登录", width=96, command=self._start_qr_login)
+        self.btn_qr = ctk.CTkButton(top, text="扫码登录", width=96,
+                                    fg_color="#fb7299", hover_color="#e8618c",
+                                    command=self._start_qr_login)
         self.btn_qr.grid(row=0, column=1, padx=4, pady=8)
         self.btn_cookie = ctk.CTkButton(top, text="粘贴Cookie", width=96,
                                         fg_color=self.theme_color("#444444", "#d9d9d9"),
@@ -158,16 +167,22 @@ class FavOrganizerApp(ctk.CTk):
                                        command=self._toggle_theme)
         self.btn_theme.grid(row=0, column=4, padx=4, pady=8)
         self._update_theme_button()
+        # 使用说明按钮
+        self.btn_help = ctk.CTkButton(top, text="使用说明", width=96,
+                                      fg_color=self.theme_color("#444444", "#d9d9d9"),
+                                      hover_color=self.theme_color("#555555", "#c7c7c7"),
+                                      command=self._show_help)
+        self.btn_help.grid(row=0, column=5, padx=4, pady=8)
 
         # ---- 中部：收藏夹列表 + 视频表 ----
-        middle = ctk.CTkFrame(self)
+        middle = ctk.CTkFrame(self, **frame_cfg)
         middle.grid(row=1, column=0, sticky="nsew", padx=10, pady=8)
         middle.grid_columnconfigure(0, weight=0)
         middle.grid_columnconfigure(1, weight=1)
         middle.grid_rowconfigure(0, weight=1)
 
         # 左：收藏夹
-        left = ctk.CTkFrame(middle)
+        left = ctk.CTkFrame(middle, **frame_cfg)
         left.grid(row=0, column=0, sticky="nsw", padx=(0, 8))
         left.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(left, text="我的收藏夹").grid(row=0, column=0, sticky="w", padx=8, pady=(8, 2))
@@ -175,16 +190,20 @@ class FavOrganizerApp(ctk.CTk):
         self.folder_scroll.grid(row=1, column=0, sticky="nsew", padx=8)
         self.folder_buttons: list[ctk.CTkButton] = []
         self.selected_folder_idx: int | None = None
-        btnrow = ctk.CTkFrame(left)
+        btnrow = ctk.CTkFrame(left, **frame_cfg)
         btnrow.grid(row=2, column=0, sticky="ew", padx=8, pady=6)
         btnrow.grid_columnconfigure(0, weight=1)
-        self.btn_refresh = ctk.CTkButton(btnrow, text="刷新列表", command=self._refresh_folders)
+        self.btn_refresh = ctk.CTkButton(btnrow, text="刷新列表",
+                                         fg_color="#fb7299", hover_color="#e8618c",
+                                         command=self._refresh_folders)
         self.btn_refresh.grid(row=0, column=0, padx=(0, 4))
-        self.btn_load = ctk.CTkButton(btnrow, text="加载该夹视频", command=self._load_selected_videos)
+        self.btn_load = ctk.CTkButton(btnrow, text="加载收藏夹视频",
+                                      fg_color="#fb7299", hover_color="#e8618c",
+                                      command=self._load_selected_videos)
         self.btn_load.grid(row=0, column=1)
 
         # 右：视频
-        right = ctk.CTkFrame(middle)
+        right = ctk.CTkFrame(middle, **frame_cfg)
         right.grid(row=0, column=1, sticky="nsew")
         right.grid_columnconfigure(0, weight=1)
         right.grid_rowconfigure(1, weight=1)
@@ -193,10 +212,11 @@ class FavOrganizerApp(ctk.CTk):
         self.video_listbox.grid(row=1, column=0, sticky="nsew", padx=8)
         self.video_listbox.tag_config("sel", background="#fb7299", foreground="#ffffff")
 
-        vbtn = ctk.CTkFrame(right)
+        vbtn = ctk.CTkFrame(right, **frame_cfg)
         vbtn.grid(row=2, column=0, sticky="ew", padx=8, pady=6)
         vbtn.grid_columnconfigure(0, weight=1)
         self.btn_category = ctk.CTkButton(vbtn, text="AI 分类并导出", width=160,
+                                          fg_color="#fb7299", hover_color="#e8618c",
                                           command=self._run_ai_classify)
         self.btn_category.grid(row=0, column=0, padx=4)
         self.btn_export = ctk.CTkButton(vbtn, text="导出当前结果", width=120,
@@ -208,13 +228,13 @@ class FavOrganizerApp(ctk.CTk):
         self.lbl_video_count.grid(row=0, column=2, padx=8)
 
         # ---- 底部：日志 + 进度 ----
-        bottom = ctk.CTkFrame(self)
+        bottom = ctk.CTkFrame(self, **frame_cfg)
         bottom.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
         bottom.grid_columnconfigure(0, weight=1)
         self.logbox = ctk.CTkTextbox(bottom, height=110, state="disabled",
                                      font=("Consolas", 11), wrap="word")
         self.logbox.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
-        progrow = ctk.CTkFrame(bottom)
+        progrow = ctk.CTkFrame(bottom, **frame_cfg)
         progrow.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
         progrow.grid_columnconfigure(0, weight=1)
         self.progress = ctk.CTkProgressBar(progrow)
@@ -585,6 +605,35 @@ class FavOrganizerApp(ctk.CTk):
             self._msg_queue.put(("categorized", None))
             return
         self._msg_queue.put(("categorized", result))
+
+    def _show_help(self) -> None:
+        """显示使用说明弹窗：分步骤引导。"""
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("使用说明")
+        dlg.geometry("560x520")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        steps = [
+            ("① 登录", "点顶部「扫码登录」，用 B站 App 扫二维码；\n或点「粘贴Cookie」，从浏览器复制 Cookie 粘贴。"),
+            ("② 选收藏夹", "左侧列表点选一个收藏夹（选中变粉色），\n点「加载收藏夹视频」拉取其中视频。"),
+            ("③ 配置 AI", "点「AI设置」，填入 DeepSeek API Key（默认已填模型），\n也可改成自定义 OpenAI 兼容接口。"),
+            ("④ 分类导出", "点「AI 分类并导出」，选择保存文件夹，\n自动生成 Excel 分表 + Markdown + HTML 清单。"),
+            ("⑤ 其他", "「导出当前结果」：跳过重新分类，直接导出上次结果。\n「刷新列表」：重新获取收藏夹。右上角可切换深浅主题。"),
+        ]
+        box = ctk.CTkFrame(dlg, fg_color="transparent")
+        box.pack(fill="both", expand=True, padx=20, pady=(16, 8))
+        for title, desc in steps:
+            ctk.CTkLabel(box, text=title, anchor="w",
+                         font=("Microsoft YaHei UI", 14, "bold"),
+                         text_color="#fb7299").pack(fill="x", pady=(8, 0))
+            ctk.CTkLabel(box, text=desc, anchor="w", justify="left",
+                         font=("Microsoft YaHei UI", 12),
+                         text_color=self.theme_color("#cccccc", "#444444"),
+                         wraplength=500).pack(fill="x", pady=(2, 0))
+        ctk.CTkButton(dlg, text="知道了", width=120,
+                      fg_color="#fb7299", hover_color="#e8618c",
+                      command=dlg.destroy).pack(pady=12)
 
     def _pick_export_dir(self) -> Path | None:
         from tkinter import filedialog
