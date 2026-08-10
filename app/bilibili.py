@@ -26,9 +26,10 @@ QR_EXPIRED = 86038       # 二维码失效
 class BilibiliError(Exception):
     """B站 API 业务错误。"""
 
-    def __init__(self, message: str, is_risk: bool = False):
+    def __init__(self, message: str, is_risk: bool = False, risk_type: str = "ip"):
         super().__init__(message)
-        self.is_risk = is_risk  # True = 风控/限流类错误（412 等）
+        self.is_risk = is_risk        # True = 风控/限流类错误（412 等）
+        self.risk_type = risk_type    # "ip" = IP 级风控，"account" = 账号级风控
 
 
 @dataclass
@@ -156,9 +157,9 @@ class BiliClient:
         except ValueError as exc:
             if resp.status_code == 412:
                 raise BilibiliError(
-                    "B站风控拦截(412)：操作过于频繁，账号可能已进入风控冷却期。"
-                    f"建议等待 30 分钟以上再试。响应详情：{resp_text[:120]}",
-                    is_risk=True) from exc
+                    f"B站风控拦截(412)：操作过于频繁，账号可能已进入风控冷却期。"
+                    f"建议先暂停批量操作，稍后重试。响应详情：{resp_text[:120]}",
+                    is_risk=True, risk_type="ip") from exc
             raise BilibiliError(f"接口返回非 JSON：{url} ({resp.status_code})") from exc
         if resp_data.get("code", 0) != 0:
             raise BilibiliError(
@@ -351,6 +352,39 @@ class BiliClient:
         }
 
     # ------------------------------------------------------------------ #
+    # 风控检测：区分 IP 风控 vs 账号风控                                     #
+    # ------------------------------------------------------------------ #
+    def _detect_risk_type(self) -> str:
+        """触发 412 风控后，等几秒再试一个轻量读接口判断风控级别。
+
+        直接用底层 session.get 绕过限流与通用错误处理，精确判断 HTTP 状态码：
+        - HTTP 200 / 非 412 的其他码 → 读接口正常 → IP 级风控（冷却短）
+        - HTTP 412 → 读接口也被限 → 账号级风控（冷却长）
+        - 探测请求只发一次，避免加重风控。
+        """
+        self._log("正在检测风控级别（等待几秒后探测）…")
+        time.sleep(3)
+        try:
+            self._log("发送探测请求：获取收藏夹列表（只读）…")
+            resp = self._session.get(
+                "https://api.bilibili.com/x/v3/fav/folder/created/list-all",
+                params={"up_mid": self.uid or 0},
+                timeout=15,
+            )
+            if resp.status_code == 412:
+                self._log("探测也触发 412 → 账号级风控（冷却较长）")
+                return "account"
+            # 能正常收到 HTTP 200 或其他非 412 码，说明读操作层已恢复
+            self._log(f"探测返回 HTTP {resp.status_code} → IP 级风控（冷却较短）")
+            return "ip"
+        except requests.RequestException as exc:
+            self._log(f"探测请求网络异常：{exc} → 保守判定账号风控")
+            return "account"
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"探测请求异常：{exc} → 保守判定账号风控")
+            return "account"
+
+    # ------------------------------------------------------------------ #
     # 写操作：按 AI 分类结果整理收藏夹                                     #
     # 注意：写接口一次只能操作 1 个视频（1 个 rid），且 B站对批量操作有风控，   #
     # 必须慢速限流（request_delay）与分批。                                  #
@@ -449,9 +483,15 @@ class BiliClient:
                 except BilibiliError as exc:
                     self._log(f"移动 {v.get('title', '')[:20]} 失败：{exc}")
                     if getattr(exc, "is_risk", False):
-                        # 风控：立即停止后续移动，避免加重风控
-                        self._log("检测到风控拦截，已停止后续移动。"
-                                  "请等待 30 分钟以上冷却后再重新整理。")
+                        risk_type = self._detect_risk_type()
+                        if risk_type == "ip":
+                            self._log("检测到 IP 级风控，已停止后续移动。"
+                                      "请等待约 10 分钟冷却后重试，或换手机热点再试。")
+                            exc.risk_type = "ip"
+                        else:
+                            self._log("检测到账号级风控，已停止后续移动。"
+                                      "请等待约 1 小时冷却后再试，期间避免任何批量写操作。")
+                            exc.risk_type = "account"
                         risk_hit = True
                         break
                 done += 1
