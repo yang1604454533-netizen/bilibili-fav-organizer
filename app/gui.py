@@ -43,11 +43,15 @@ class FavOrganizerApp(ctk.CTk):
         self.ai_config = self._build_ai_config()
         self.qr_key: str = ""
         self.qr_polling = False
+        self._qr_dlg = None                     # 扫码弹窗引用
         self._ai: AIClassifier | None = None
         self._msg_queue = queue.Queue()
         self._current_folders: list = []          # FavoriteFolder
         self._current_videos: list[dict] = []     # 拉取的收藏视频（dict 形式）
         self._categorized: dict[str, list[dict]] = {}
+        # 主题：优先读取配置，默认跟随系统
+        self.appearance_mode = str(self.cfg.get("theme", "system"))
+        ctk.set_appearance_mode(self.appearance_mode)
 
         self._build_ui()
         # 后台日志轮询
@@ -82,6 +86,37 @@ class FavOrganizerApp(ctk.CTk):
         )
 
     # ------------------------------------------------------------------ #
+    # 主题切换                                                            #
+    # ------------------------------------------------------------------ #
+    def _update_theme_button(self) -> None:
+        """刷新主题按钮文本。"""
+        labels = {"light": "☀ 浅色", "dark": "🌙 深色", "system": "🖥 跟随系统"}
+        self.btn_theme.configure(text=labels.get(self.appearance_mode, "主题"))
+
+    def _toggle_theme(self) -> None:
+        """循环切换 浅色 → 深色 → 跟随系统。"""
+        order = ["light", "dark", "system"]
+        cur = self.appearance_mode
+        nxt = order[(order.index(cur) + 1) % len(order)] if cur in order else "system"
+        self.appearance_mode = nxt
+        ctk.set_appearance_mode(nxt)
+        self.cfg["theme"] = nxt
+        appconfig.save_config(self.cfg)
+        self._update_theme_button()
+        # 重渲染收藏夹列表以应用主题色（按钮颜色是渲染时固定的）
+        if self._current_folders:
+            self._render_folders(self._current_folders)
+        self._log(f"已切换主题：{self._theme_label(nxt)}")
+
+    @staticmethod
+    def _theme_label(mode: str) -> str:
+        return {"light": "浅色", "dark": "深色", "system": "跟随系统"}.get(mode, mode)
+
+    def theme_color(self, dark: str, light: str) -> str:
+        """返回当前主题下的颜色：深色主题用 dark，浅色主题用 light。"""
+        return dark if self.appearance_mode != "light" else light
+
+    # ------------------------------------------------------------------ #
     # UI 构建                                                            #
     # ------------------------------------------------------------------ #
     def _build_ui(self) -> None:
@@ -98,12 +133,23 @@ class FavOrganizerApp(ctk.CTk):
 
         self.btn_qr = ctk.CTkButton(top, text="扫码登录", width=96, command=self._start_qr_login)
         self.btn_qr.grid(row=0, column=1, padx=4, pady=8)
-        self.btn_cookie = ctk.CTkButton(top, text="粘贴Cookie", width=96, fg_color="#444444",
-                                        hover_color="#555555", command=self._cookie_login_dialog)
+        self.btn_cookie = ctk.CTkButton(top, text="粘贴Cookie", width=96,
+                                        fg_color=self.theme_color("#444444", "#d9d9d9"),
+                                        hover_color=self.theme_color("#555555", "#c7c7c7"),
+                                        command=self._cookie_login_dialog)
         self.btn_cookie.grid(row=0, column=2, padx=4, pady=8)
-        self.btn_settings = ctk.CTkButton(top, text="AI设置", width=96, fg_color="#444444",
-                                          hover_color="#555555", command=self._open_settings)
+        self.btn_settings = ctk.CTkButton(top, text="AI设置", width=96,
+                                          fg_color=self.theme_color("#444444", "#d9d9d9"),
+                                          hover_color=self.theme_color("#555555", "#c7c7c7"),
+                                          command=self._open_settings)
         self.btn_settings.grid(row=0, column=3, padx=4, pady=8)
+        # 主题切换按钮（浅色/深色/跟随系统）
+        self.btn_theme = ctk.CTkButton(top, text="", width=96,
+                                       fg_color=self.theme_color("#444444", "#d9d9d9"),
+                                       hover_color=self.theme_color("#555555", "#c7c7c7"),
+                                       command=self._toggle_theme)
+        self.btn_theme.grid(row=0, column=4, padx=4, pady=8)
+        self._update_theme_button()
 
         # ---- 中部：收藏夹列表 + 视频表 ----
         middle = ctk.CTkFrame(self)
@@ -146,7 +192,8 @@ class FavOrganizerApp(ctk.CTk):
                                           command=self._run_ai_classify)
         self.btn_category.grid(row=0, column=0, padx=4)
         self.btn_export = ctk.CTkButton(vbtn, text="导出当前结果", width=120,
-                                        fg_color="#444444", hover_color="#555555",
+                                        fg_color=self.theme_color("#444444", "#d9d9d9"),
+                                        hover_color=self.theme_color("#555555", "#c7c7c7"),
                                         command=self._export_only)
         self.btn_export.grid(row=0, column=1, padx=4)
         self.lbl_video_count = ctk.CTkLabel(vbtn, text="共 0 条")
@@ -290,6 +337,7 @@ class FavOrganizerApp(ctk.CTk):
         dlg.geometry("340x400")
         dlg.resizable(False, False)
         dlg.grab_set()
+        self._qr_dlg = dlg  # 保存引用，登录成功时自动关闭
         lab = ctk.CTkLabel(dlg, text="")
         lab.image = tk_img  # 防止被 GC
         lab.configure(image=tk_img)
@@ -320,6 +368,15 @@ class FavOrganizerApp(ctk.CTk):
             self.btn_qr.configure(state="normal", text="扫码登录")
         if state == "success":
             self._update_login_status()
+            # 登录成功：自动关闭扫码弹窗
+            dlg = getattr(self, "_qr_dlg", None)
+            if dlg is not None:
+                try:
+                    if dlg.winfo_exists():
+                        dlg.destroy()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._qr_dlg = None
 
     def _cookie_login_dialog(self) -> None:
         dlg = ctk.CTkToplevel(self)
@@ -329,7 +386,7 @@ class FavOrganizerApp(ctk.CTk):
         tip = ctk.CTkLabel(dlg, text=(
             "请从浏览器登录 bilibili.com 后，复制当前页面的 Cookie 粘贴到下面：\n"
             "（在浏览器按 F12 → 网络 → 刷新页面 → 点击任意请求 → 请求头里复制 Cookie 整行）"),
-            justify="left", wraplength=520, text_color="#aaaaaa")
+            justify="left", wraplength=520, text_color=self.theme_color("#aaaaaa", "#666666"))
         tip.pack(padx=16, pady=(14, 8), anchor="w")
         self.cookie_entry = ctk.CTkTextbox(dlg, height=130, wrap="word")
         self.cookie_entry.pack(padx=16, pady=6, fill="both", expand=True)
@@ -352,8 +409,8 @@ class FavOrganizerApp(ctk.CTk):
         row = ctk.CTkFrame(dlg)
         row.pack(padx=16, pady=12, fill="x")
         ctk.CTkButton(row, text="登录", command=_submit).pack(side="left", padx=4)
-        ctk.CTkButton(row, text="取消", fg_color="#444444",
-                      hover_color="#555555", command=dlg.destroy).pack(side="left", padx=4)
+        ctk.CTkButton(row, text="取消", fg_color=self.theme_color("#444444", "#d9d9d9"),
+                      hover_color=self.theme_color("#555555", "#c7c7c7"), command=dlg.destroy).pack(side="left", padx=4)
 
     def _update_login_status(self) -> None:
         if self.client.is_logged_in:
@@ -403,15 +460,16 @@ class FavOrganizerApp(ctk.CTk):
         self.folder_buttons.clear()
         if not folders:
             ctk.CTkLabel(self.folder_scroll, text="（暂无收藏夹或未登录）",
-                         text_color="#888888").pack(fill="x", padx=4, pady=8)
+                         text_color=self.theme_color("#888888", "#666666")).pack(fill="x", padx=4, pady=8)
             return
         for i, f in enumerate(folders):
             priv = " 🔒" if f.is_private else ""
             line = f"{i + 1:>2}. {f.title}{priv}（{f.media_count}）"
             btn = ctk.CTkButton(
                 self.folder_scroll, text=line, anchor="w",
-                height=32, fg_color="transparent", hover_color="#2f2f2f",
-                text_color="#dddddd", corner_radius=6,
+                height=32, fg_color="transparent",
+                hover_color=self.theme_color("#2f2f2f", "#e2e2e2"),
+                text_color=self.theme_color("#dddddd", "#333333"), corner_radius=6,
                 command=lambda idx=i: self._select_folder(idx),
             )
             btn.pack(fill="x", padx=2, pady=1)
@@ -425,8 +483,8 @@ class FavOrganizerApp(ctk.CTk):
                 btn.configure(fg_color="#fb7299", hover_color="#fb7299",
                               text_color="#ffffff")
             else:
-                btn.configure(fg_color="transparent", hover_color="#2f2f2f",
-                              text_color="#dddddd")
+                btn.configure(fg_color="transparent", hover_color=self.theme_color("#2f2f2f", "#e2e2e2"),
+                              text_color=self.theme_color("#dddddd", "#333333"))
 
     def _selected_folder_index(self) -> int | None:
         """返回当前选中的收藏夹索引；无选中返回 None。"""
@@ -567,7 +625,7 @@ class FavOrganizerApp(ctk.CTk):
         dlg.resizable(False, False)
         dlg.grab_set()
 
-        ctk.CTkLabel(dlg, text="接入方式：DeepSeek 官方 / 自定义 OpenAI 兼容 API", text_color="#aaaaaa"
+        ctk.CTkLabel(dlg, text="接入方式：DeepSeek 官方 / 自定义 OpenAI 兼容 API", text_color=self.theme_color("#aaaaaa", "#666666")
                      ).pack(anchor="w", padx=20, pady=(14, 2))
 
         def field(parent, label, default, show=None):
@@ -587,7 +645,7 @@ class FavOrganizerApp(ctk.CTk):
         e_temp = field(dlg, "temperature (0-1)", self.ai_config.temperature)
         e_token = field(dlg, "max_tokens", self.ai_config.max_tokens)
 
-        ctk.CTkLabel(dlg, text="分类列表（每行一个，可增删改）：", text_color="#aaaaaa"
+        ctk.CTkLabel(dlg, text="分类列表（每行一个，可增删改）：", text_color=self.theme_color("#aaaaaa", "#666666")
                      ).pack(anchor="w", padx=20, pady=(10, 2))
         e_cats = ctk.CTkTextbox(dlg, height=160, wrap="word")
         e_cats.pack(fill="x", padx=20)
@@ -621,8 +679,8 @@ class FavOrganizerApp(ctk.CTk):
         row = ctk.CTkFrame(dlg, fg_color="transparent")
         row.pack(fill="x", padx=20, pady=14)
         ctk.CTkButton(row, text="保存", command=_save).pack(side="left", padx=4)
-        ctk.CTkButton(row, text="取消", fg_color="#444444",
-                      hover_color="#555555", command=dlg.destroy).pack(side="left", padx=4)
+        ctk.CTkButton(row, text="取消", fg_color=self.theme_color("#444444", "#d9d9d9"),
+                      hover_color=self.theme_color("#555555", "#c7c7c7"), command=dlg.destroy).pack(side="left", padx=4)
 
     # ------------------------------------------------------------------ #
     # 收尾                                                                #
