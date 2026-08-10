@@ -103,9 +103,8 @@ class FavOrganizerApp(ctk.CTk):
         self.cfg["theme"] = nxt
         appconfig.save_config(self.cfg)
         self._update_theme_button()
-        # 重渲染收藏夹列表以应用主题色（按钮颜色是渲染时固定的）
-        if self._current_folders:
-            self._render_folders(self._current_folders)
+        # 重渲染收藏夹列表以应用主题色（system 模式下实际模式可能变化）
+        self._render_folders(self._current_folders if self._current_folders else [])
         self._log(f"已切换主题：{self._theme_label(nxt)}")
 
     @staticmethod
@@ -113,8 +112,17 @@ class FavOrganizerApp(ctk.CTk):
         return {"light": "浅色", "dark": "深色", "system": "跟随系统"}.get(mode, mode)
 
     def theme_color(self, dark: str, light: str) -> str:
-        """返回当前主题下的颜色：深色主题用 dark，浅色主题用 light。"""
-        return dark if self.appearance_mode != "light" else light
+        """返回当前主题下的颜色：深色主题用 dark，浅色主题用 light。
+
+        用 ctk.get_appearance_mode() 解析实际生效的模式（system 会跟随系统），
+        避免 system 模式下按钮文字与背景同色不可见。
+        """
+        try:
+            actual = ctk.get_appearance_mode()  # 'Light' / 'Dark'
+            is_dark = actual == "Dark"
+        except Exception:  # noqa: BLE001
+            is_dark = self.appearance_mode != "light"
+        return dark if is_dark else light
 
     # ------------------------------------------------------------------ #
     # UI 构建                                                            #
