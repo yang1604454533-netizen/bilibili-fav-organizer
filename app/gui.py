@@ -233,6 +233,7 @@ class FavOrganizerApp(ctk.CTk):
                 elif kind == "qr_state":
                     self._update_qr_state(payload)
                 elif kind == "folders_loaded":
+                    self._current_folders = payload
                     self._render_folders(payload)
                 elif kind == "videos_loaded":
                     self._render_videos(payload)
@@ -447,11 +448,25 @@ class FavOrganizerApp(ctk.CTk):
             return
         finally:
             self._msg_queue.put(("log", ""))
-        self._current_folders = folders
+        # 数据经队列传给主线程（避免跨线程写 self._current_folders 竞态）
         self._msg_queue.put(("folders_loaded", folders))
         self._log(f"获取到 {len(folders)} 个收藏夹")
 
     def _render_folders(self, folders) -> None:
+        try:
+            self._render_folders_impl(folders)
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"收藏夹渲染失败：{exc}")
+            # 兜底：清空并显示错误占位
+            try:
+                for w in self.folder_scroll.winfo_children():
+                    w.destroy()
+                ctk.CTkLabel(self.folder_scroll, text=f"渲染失败：{exc}",
+                             text_color="#ef5350").pack(fill="x", padx=4, pady=8)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _render_folders_impl(self, folders) -> None:
         self.btn_refresh.configure(state="normal", text="刷新列表")
         self.selected_folder_idx = None
         # 清空旧的按钮
@@ -474,6 +489,7 @@ class FavOrganizerApp(ctk.CTk):
             )
             btn.pack(fill="x", padx=2, pady=1)
             self.folder_buttons.append(btn)
+        self.folder_scroll.update_idletasks()
 
     def _select_folder(self, idx: int) -> None:
         """选中收藏夹：更新高亮样式。"""
