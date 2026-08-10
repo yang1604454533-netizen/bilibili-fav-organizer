@@ -142,10 +142,17 @@ class BiliClient:
         body = dict(data or {})
         if "csrf" not in body and self.csrf:
             body["csrf"] = self.csrf
-        resp = self._session.post(url, data=body, **kwargs)
+        # 写接口需要视频页 Referer（降低风控概率）
+        headers = dict(kwargs.pop("headers", {}))
+        headers.setdefault("Referer", "https://www.bilibili.com/video/")
+        resp = self._session.post(url, data=body, headers=headers, **kwargs)
         try:
             resp_data = resp.json()
         except ValueError as exc:
+            if resp.status_code == 412:
+                raise BilibiliError(
+                    "B站风控拦截(412)：操作过于频繁。请放慢节奏或稍后重试，"
+                    "建议每次整理间隔几分钟") from exc
             raise BilibiliError(f"接口返回非 JSON：{url} ({resp.status_code})") from exc
         if resp_data.get("code", 0) != 0:
             raise BilibiliError(
@@ -363,19 +370,22 @@ class BiliClient:
                              del_media_id: Optional[int] = None) -> None:
         """把单个视频加入目标收藏夹（可选：从原收藏夹移除）。
 
+        采用两步策略降低风控：先 add（不带 del），成功后再单独 del。
         :param aid: 视频 aid
         :param add_media_id: 目标收藏夹 media_id
         :param del_media_id: 可选，原收藏夹 media_id（移动时传）
         """
         if not self.csrf:
             raise BilibiliError("缺少 bili_jct，无法执行写操作（请重新扫码登录）")
-        data = {
-            "rid": aid,
-            "type": 2,
-            "add_media_ids": add_media_id,
-            "del_media_ids": del_media_id or "",
-        }
-        self._post("https://api.bilibili.com/x/v3/fav/resource/deal", data=data)
+        # 第一步：加入目标收藏夹
+        self._post("https://api.bilibili.com/x/v3/fav/resource/deal",
+                   data={"rid": aid, "type": 2, "add_media_ids": add_media_id,
+                         "del_media_ids": ""})
+        # 第二步：从原收藏夹移除（间隔限流由 request_delay 保证）
+        if del_media_id:
+            self._post("https://api.bilibili.com/x/v3/fav/resource/deal",
+                       data={"rid": aid, "type": 2, "add_media_ids": "",
+                             "del_media_ids": del_media_id})
 
     def apply_classification(self, videos: list[dict],
                              categorized: dict[str, list[dict]],

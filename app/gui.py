@@ -747,7 +747,14 @@ class FavOrganizerApp(ctk.CTk):
 
     def _do_export(self, out_dir: Path) -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
-        xlsx_file = exporter.export_excel(self._categorized, out_dir)
+        # 若目标文件被占用（如 Excel 正打开），自动改用带时间戳的文件名
+        try:
+            xlsx_file = exporter.export_excel(self._categorized, out_dir)
+        except (PermissionError, OSError):
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            self._log("导出文件名被占用（可能被 Excel 打开），改用带时间戳的文件名")
+            xlsx_file = exporter.export_excel(self._categorized, out_dir,
+                                              filename=f"收藏夹分类清单_{stamp}.xlsx")
         md_file = exporter.export_markdown(self._categorized, out_dir)
         html_file = exporter.export_html(self._categorized, out_dir)
         n_sheets = exporter.count_excel_sheets(xlsx_file)

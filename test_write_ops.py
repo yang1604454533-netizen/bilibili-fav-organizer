@@ -87,12 +87,15 @@ def main():
         assert req["title"] == "测试分类" and req["privacy"] == "0" and req["csrf"] == "csrf123", req
         assert "folder/add" in RECEIVED[-1]["path"]
 
-        # 2) 移动视频
+        # 2) 移动视频（两步：先 add 后 del）
         client.move_video_to_folder(aid=12345, add_media_id=999, del_media_id=100)
-        req2 = RECEIVED[-1]["data"]
-        print("[3] move OK, 请求:", req2)
+        req2 = RECEIVED[-2]["data"]  # 第一步 add
+        req2b = RECEIVED[-1]["data"]  # 第二步 del
+        print("[3] move add 请求:", req2)
+        print("[3] move del 请求:", req2b)
         assert req2["rid"] == "12345" and req2["type"] == "2", req2
-        assert req2["add_media_ids"] == "999" and req2["del_media_ids"] == "100", req2
+        assert req2["add_media_ids"] == "999" and req2.get("del_media_ids", "") == "", req2
+        assert req2b["del_media_ids"] == "100" and req2b.get("add_media_ids", "") == "", req2b
         assert req2["csrf"] == "csrf123"
         assert "resource/deal" in RECEIVED[-1]["path"]
 
@@ -109,8 +112,8 @@ def main():
         creates = [r for r in RECEIVED if "folder/add" in r["path"]]
         deals = [r for r in RECEIVED if "resource/deal" in r["path"]]
         print(f"[5] 请求统计: create={len(creates)} deal={len(deals)}")
-        # 手动 move 1 次 + apply 2 次 = 3 次 deal；create 手动 1 次 + apply 2 次 = 3 次
-        assert len(deals) == 3, f"deal 数 {len(deals)}"
+        # 手动 move 1 次(2个deal) + apply 2 视频(4个deal) = 6 deal；create 手动 1 次 + apply 2 次 = 3 次
+        assert len(deals) == 6, f"deal 数 {len(deals)}"
         assert len(creates) == 3, f"create 数 {len(creates)}"
     finally:
         bb.BiliClient._get_raw = orig_get
