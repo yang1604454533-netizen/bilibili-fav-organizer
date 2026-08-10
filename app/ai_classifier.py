@@ -102,24 +102,28 @@ class AIClassifier:
             raise ValueError("AI 配置无效：请先填写 API Key 并确认模型名")
 
         cat_map: dict[str, str] = {}          # bvid -> 分类名
-        # 单批视频数：8 条一批（推理模型的 reasoning 会占 completion tokens，
-        # 批量过大会导致 JSON 输出被 max_tokens 截断 → 解析失败）
-        batch_size = max(1, min(8, self._max_workers * 2))
+        # 单批视频数：5 条一批（推理模型 reasoning 占用大，批量过大会
+        # 导致 JSON 输出被 max_tokens 截断或空内容，5 条最稳）
+        batch_size = max(1, min(5, self._max_workers))
         batches = [videos[i:i + batch_size] for i in range(0, len(videos), batch_size)]
         total = len(batches)
 
         self._log(f"开始 AI 分类：共 {len(videos)} 条视频，分 {total} 批，模型={self.config.model}")
         done = 0
         with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
-            futures = [pool.submit(self._classify_batch, b) for b in batches]
+            futures = {pool.submit(self._classify_batch, b): b for b in batches}
             for fut in as_completed(futures):
                 try:
                     result = fut.result()
                     cat_map.update(result)
                 except Exception as exc:
-                    self._log(f"批次分类失败：{exc}，该批视频归入'其他'")
-                    # 批次内容拿到的是原始视频列表，需要兜底
-                    # （在 _classify_batch 内部已做兜底，这里仅记录日志）
+                    # 线程内异常穿透到这里（理论上 _classify_batch 已兜底），
+                    # 拿到对应 batch 逐条启发式兜底，避免整批变"其他"
+                    self._log(f"批次分类异常（{exc}），逐条启发式兜底")
+                    try:
+                        cat_map.update(self._heuristic_classify(futures[fut]))
+                    except Exception:  # noqa: BLE001
+                        pass
                 done += 1
                 self._bump_progress(done, total)
 
@@ -156,20 +160,32 @@ class AIClassifier:
             items="\n".join(items_text),
         )
 
-    def _classify_batch(self, batch: list[dict], retries: int = 2) -> dict[str, str]:
-        """单批分类（带重试），返回 {bvid: category}。"""
-        prompt = self._build_prompt(batch)
-        content = self._chat(prompt, retries=retries)
+    def _classify_batch(self, batch: list[dict], retries: int = 3) -> dict[str, str]:
+        """单批分类（带重试），返回 {bvid: category}。
+
+        任何失败路径都不会穿透：AI 请求失败或结果不可用时，
+        自动逐条启发式兜底，避免整批归入"其他"。
+        """
         mapping: dict[str, str] = {}
-        if content:
-            try:
+        try:
+            prompt = self._build_prompt(batch)
+            content = self._chat(prompt, retries=retries)
+            if content:
                 mapping = self._parse_response(content)
-            except ValueError as exc:
-                self._log(f"解析 AI 返回失败：{exc}")
+        except ValueError as exc:
+            self._log(f"解析 AI 返回失败：{exc}")
+        except Exception as exc:  # noqa: BLE001 - 网络/限流/模型异常
+            self._log(f"AI 请求失败（{exc}），该批改用启发式分类")
         if not mapping:
-            self._log("AI 结果无法使用，改用本地关键词启发式分类")
+            # 兜底：AI 结果不可用时按标题/简介关键词粗分类
             mapping = self._heuristic_classify(batch)
-        # 兜底：仍缺失的 bvid 归入"其他"
+        else:
+            # 部分结果：对 AI 未覆盖的条目逐条启发式兜底，避免归"其他"
+            heu = self._heuristic_classify(batch)
+            for v in batch:
+                if v["bvid"] not in mapping:
+                    mapping[v["bvid"]] = heu.get(v["bvid"], "其他")
+        # 仍缺失的 bvid 归入"其他"
         for v in batch:
             mapping.setdefault(v["bvid"], "其他")
         return mapping
@@ -234,11 +250,12 @@ class AIClassifier:
                 if not content:
                     # 推理模型偶发：reasoning 占满输出导致 content 为空，属可自愈情况
                     raise RuntimeError("模型偶发未输出正文，自动重试")
-                # 截断检测：期待 JSON 但输出未闭合 → 增大 max_tokens 重试
+                # 截断：返回内容未闭合（JSON 被 max_tokens 截断）
                 if self._looks_truncated(content):
-                    self._log(f"返回内容疑似被 max_tokens 截断（长度 {len(content)}），增大到 {max_tokens * 2} 重试")
-                    max_tokens = max_tokens * 2
-                    raise RuntimeError("content 被截断")
+                    # 不抛异常：保留已输出的部分，交由 _parse_response
+                    # 正则逐条提取能用的条目，剩余由启发式兜底
+                    self._log(f"返回内容被截断（长度 {len(content)}），尝试提取已输出部分")
+                    return content
                 return content
             except Exception as exc:  # noqa: BLE001 - 需要捕获一切以重试
                 last_exc = exc
