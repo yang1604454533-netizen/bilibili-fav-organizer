@@ -77,8 +77,8 @@ class FavOrganizerApp(ctk.CTk):
         self._current_folders: list = []          # FavoriteFolder
         self._current_videos: list[dict] = []     # 拉取的收藏视频（dict 形式）
         self._categorized: dict[str, list[dict]] = {}
-        # 主题：优先读取配置，默认跟随系统
-        self.appearance_mode = str(self.cfg.get("theme", "system"))
+        # 主题：优先读取配置，默认浅色蓝色
+        self.appearance_mode = str(self.cfg.get("theme", "light"))
         ctk.set_appearance_mode(self.appearance_mode)
 
         self._build_ui()
@@ -118,20 +118,18 @@ class FavOrganizerApp(ctk.CTk):
     # ------------------------------------------------------------------ #
     def _update_theme_button(self) -> None:
         """刷新主题按钮文本。"""
-        labels = {"light": "☀ 浅色", "dark": "🌙 深色", "system": "🖥 跟随系统"}
+        labels = {"light": "☀ 浅色", "dark": "🌙 深色"}
         self.btn_theme.configure(text=labels.get(self.appearance_mode, "主题"))
 
     def _toggle_theme(self) -> None:
-        """循环切换 浅色 → 深色 → 跟随系统。"""
-        order = ["light", "dark", "system"]
-        cur = self.appearance_mode
-        nxt = order[(order.index(cur) + 1) % len(order)] if cur in order else "system"
+        """浅色 ↔ 深色 两态切换。"""
+        nxt = "dark" if self.appearance_mode != "dark" else "light"
         self.appearance_mode = nxt
         ctk.set_appearance_mode(nxt)
         self.cfg["theme"] = nxt
         appconfig.save_config(self.cfg)
         self._update_theme_button()
-        # 重渲染收藏夹列表以应用主题色（system 模式下实际模式可能变化）
+        # 重渲染收藏夹列表以应用主题色
         self._render_folders(self._current_folders if self._current_folders else [])
         # 刷新全局配色：主窗口背景 + 顶栏按钮
         self.configure(fg_color=self.pc("bg"))
@@ -150,7 +148,7 @@ class FavOrganizerApp(ctk.CTk):
 
     @staticmethod
     def _theme_label(mode: str) -> str:
-        return {"light": "浅色", "dark": "深色", "system": "跟随系统"}.get(mode, mode)
+        return {"light": "浅色", "dark": "深色"}.get(mode, mode)
 
     def palette(self) -> dict:
         """返回当前主题的色板（浅色=蓝调，深色=粉调）。"""
@@ -196,7 +194,7 @@ class FavOrganizerApp(ctk.CTk):
         top.grid_columnconfigure(0, weight=1)
 
         self.login_status = ctk.CTkLabel(top, text="未登录",
-                                         text_color=self.pc("muted"),
+                                         text_color=self.pc("accent"),
                                          font=("Microsoft YaHei UI", 12))
         self.login_status.grid(row=0, column=0, sticky="w", padx=12, pady=8)
 
@@ -244,7 +242,8 @@ class FavOrganizerApp(ctk.CTk):
         left.grid(row=0, column=0, sticky="nsw", padx=(0, 8))
         left.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(left, text="我的收藏夹",
-                     text_color=self.pc("text")).grid(row=0, column=0, sticky="w", padx=8, pady=(8, 2))
+                     text_color=self.pc("accent"), font=("Microsoft YaHei UI", 14, "bold")
+                     ).grid(row=0, column=0, sticky="w", padx=8, pady=(8, 2))
         self.folder_scroll = ctk.CTkScrollableFrame(left, width=300, height=380)
         self.folder_scroll.grid(row=1, column=0, sticky="nsew", padx=8)
         self.folder_buttons: list[ctk.CTkButton] = []
@@ -267,7 +266,8 @@ class FavOrganizerApp(ctk.CTk):
         right.grid_columnconfigure(0, weight=1)
         right.grid_rowconfigure(1, weight=1)
         ctk.CTkLabel(right, text="收藏的视频（选择后点下方按钮分类导出）",
-                     text_color=self.pc("text")).grid(row=0, column=0, sticky="w", padx=8, pady=(8, 2))
+                     text_color=self.pc("accent"), font=("Microsoft YaHei UI", 14, "bold")
+                     ).grid(row=0, column=0, sticky="w", padx=8, pady=(8, 2))
         self.video_listbox = ctk.CTkTextbox(right, state="disabled", font=("Microsoft YaHei UI", 13), wrap="none")
         self.video_listbox.grid(row=1, column=0, sticky="nsew", padx=8)
         self.video_listbox.tag_config("sel", background=self.pc("accent"), foreground=self.pc("selected_text"))

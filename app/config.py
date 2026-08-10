@@ -38,6 +38,7 @@ DEFAULTS = {
     "temperature": 0.2,
     "max_tokens": 4000,
     "categories": list(DEFAULT_CATEGORIES),
+    "theme": "light",
 }
 
 
@@ -57,6 +58,9 @@ def load_config() -> dict:
                     cfg["max_tokens"] = 4000
             except (TypeError, ValueError):
                 cfg["max_tokens"] = 4000
+            # 配置迁移：旧版无 theme 或为 system 的默认改为浅色（去除跟随系统）
+            if str(cfg.get("theme", "light")) == "system":
+                cfg["theme"] = "light"
     except (OSError, ValueError) as exc:
         print(f"[config] 读取配置失败，使用默认值：{exc}")
     return cfg
