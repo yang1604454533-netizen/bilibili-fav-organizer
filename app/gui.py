@@ -77,6 +77,7 @@ class FavOrganizerApp(ctk.CTk):
         self._current_folders: list = []          # FavoriteFolder
         self._current_videos: list[dict] = []     # 拉取的收藏视频（dict 形式）
         self._categorized: dict[str, list[dict]] = {}
+        self._source_folder = None                # 当前加载的源收藏夹
         # 主题：优先读取配置，默认浅色蓝色
         self.appearance_mode = str(self.cfg.get("theme", "light"))
         ctk.set_appearance_mode(self.appearance_mode)
@@ -285,8 +286,14 @@ class FavOrganizerApp(ctk.CTk):
                                         text_color=self.pc("text"),
                                         command=self._export_only)
         self.btn_export.grid(row=0, column=1, padx=4)
+        self.btn_organize = ctk.CTkButton(vbtn, text="按分类整理收藏夹", width=140,
+                                          fg_color=self.pc("secondary"),
+                                          hover_color=self.pc("secondary_hover"),
+                                          text_color=self.pc("text"),
+                                          command=self._organize_folders)
+        self.btn_organize.grid(row=0, column=2, padx=4)
         self.lbl_video_count = ctk.CTkLabel(vbtn, text="共 0 条")
-        self.lbl_video_count.grid(row=0, column=2, padx=8)
+        self.lbl_video_count.grid(row=0, column=3, padx=8)
 
         # ---- 底部：日志 + 进度 ----
         bottom = ctk.CTkFrame(self, **frame_cfg)
@@ -333,6 +340,8 @@ class FavOrganizerApp(ctk.CTk):
                     self._update_progress(cur, total, label)
                 elif kind == "categorized":
                     self._on_categorized(payload)
+                elif kind == "organize_done":
+                    self.btn_organize.configure(state="normal", text="按分类整理收藏夹")
                 elif kind == "error":
                     self._show_error_dialog(payload)
         except queue.Empty:
@@ -609,6 +618,7 @@ class FavOrganizerApp(ctk.CTk):
             self._log("该收藏夹为私密，请先登录")
             return
         self._log(f"开始加载收藏夹「{folder.title}」…")
+        self._source_folder = folder  # 记录源收藏夹（按分类整理时用）
         self.btn_load.configure(state="disabled", text="加载中…")
         self.lbl_video_count.configure(text="加载中…")
         threading.Thread(target=self._videos_worker, args=(folder,), daemon=True).start()
@@ -627,7 +637,7 @@ class FavOrganizerApp(ctk.CTk):
         self._msg_queue.put(("log", f"收藏夹「{folder.title}」共 {len(videos)} 条视频"))
 
     def _render_videos(self, videos) -> None:
-        self.btn_load.configure(state="normal", text="加载该夹视频")
+        self.btn_load.configure(state="normal", text="加载收藏夹视频")
         self.lbl_video_count.configure(text=f"共 {len(videos)} 条")
         self._current_videos = [v.to_dict() for v in videos]
         self._categorized = {}
@@ -672,7 +682,7 @@ class FavOrganizerApp(ctk.CTk):
         """显示使用说明弹窗：分步骤引导。"""
         dlg = ctk.CTkToplevel(self)
         dlg.title("使用说明")
-        dlg.geometry("560x520")
+        dlg.geometry("560x600")
         dlg.resizable(False, False)
         dlg.grab_set()
 
@@ -681,7 +691,8 @@ class FavOrganizerApp(ctk.CTk):
             ("② 选收藏夹", "左侧列表点选一个收藏夹（选中变粉色），\n点「加载收藏夹视频」拉取其中视频。"),
             ("③ 配置 AI", "点「AI设置」，填入 DeepSeek API Key（默认已填模型），\n也可改成自定义 OpenAI 兼容接口。"),
             ("④ 分类导出", "点「AI 分类并导出」，选择保存文件夹，\n自动生成 Excel 分表 + Markdown + HTML 清单。"),
-            ("⑤ 其他", "「导出当前结果」：跳过重新分类，直接导出上次结果。\n「刷新列表」：重新获取收藏夹。右上角可切换深浅主题。"),
+            ("⑤ 整理收藏夹", "点「按分类整理收藏夹」并确认，自动在 B站\n新建分类收藏夹并把视频移入（原夹保留，慢速防风控）。"),
+            ("⑥ 其他", "「导出当前结果」：跳过重新分类，直接导出上次结果。\n「刷新列表」：重新获取收藏夹。右上角可切换深浅主题。"),
         ]
         box = ctk.CTkFrame(dlg, fg_color="transparent")
         box.pack(fill="both", expand=True, padx=20, pady=(16, 8))
@@ -749,6 +760,70 @@ class FavOrganizerApp(ctk.CTk):
             os.startfile(str(out_dir))  # noqa: S606 - 用户主动触发的资源管理器打开
         except Exception:  # noqa: BLE001
             pass
+
+    # ------------------------------------------------------------------ #
+    # 按分类整理收藏夹（写操作）                                            #
+    # ------------------------------------------------------------------ #
+    def _organize_folders(self) -> None:
+        """按 AI 分类结果整理 B站收藏夹：新建分类夹并把视频移入。"""
+        if not self._categorized:
+            self._log("还没有分类结果，请先点击「AI 分类并导出」")
+            return
+        if not self._current_videos:
+            self._log("没有已加载的视频数据")
+            return
+        if not self.client.csrf:
+            self._show_error_dialog("缺少 bili_jct（写操作凭据），请重新扫码登录后再试")
+            return
+        # 确认对话框（写操作，需用户明确确认）
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("确认整理收藏夹")
+        dlg.geometry("520x300")
+        dlg.grab_set()
+        src_name = self._source_folder.title if self._source_folder else "当前收藏夹"
+        total = sum(len(v) for v in self._categorized.values())
+        ctk.CTkLabel(dlg, text="即将执行以下写操作（会真实修改你的 B站收藏夹）：",
+                     justify="left", wraplength=460,
+                     text_color=self.pc("accent")).pack(anchor="w", padx=20, pady=(16, 6))
+        ctk.CTkLabel(dlg, text=(
+            f"1. 为每个分类创建收藏夹（已存在则复用）\n"
+            f"2. 把 {total} 条视频从「{src_name}」移入对应分类夹\n"
+            f"3. 保留原收藏夹\n\n"
+            f"⚠ 为降低 B站风控风险，将以慢速（每步约 1 秒）分批执行，"
+            f"期间请勿关闭程序。"),
+            justify="left", wraplength=460,
+            text_color=self.pc("text")).pack(anchor="w", padx=20, pady=4)
+
+        def _do():
+            dlg.destroy()
+            self.btn_organize.configure(state="disabled", text="整理中…")
+            threading.Thread(target=self._organize_worker, daemon=True).start()
+
+        row = ctk.CTkFrame(dlg, fg_color="transparent")
+        row.pack(pady=14)
+        ctk.CTkButton(row, text="确认执行", width=120,
+                      fg_color=self.pc("primary"), hover_color=self.pc("primary_hover"),
+                      command=_do).pack(side="left", padx=8)
+        ctk.CTkButton(row, text="取消", width=120,
+                      fg_color=self.pc("secondary"), hover_color=self.pc("secondary_hover"),
+                      text_color=self.pc("text"), command=dlg.destroy).pack(side="left", padx=8)
+
+    def _organize_worker(self) -> None:
+        try:
+            moved = self.client.apply_classification(
+                self._current_videos,
+                self._categorized,
+                self._source_folder.id if self._source_folder else 0,
+                progress_cb=lambda cur, total: self._msg_queue.put(
+                    ("progress", (cur, total, f"整理中 {cur}/{total}"))),
+            )
+            stats = "、".join(f"{k} {v}条" for k, v in moved.items() if v)
+            self._msg_queue.put(("log", f"收藏夹整理完成：{stats}"))
+            self._msg_queue.put(("progress", (1, 1, "整理完成")))
+        except Exception as exc:  # noqa: BLE001
+            self._msg_queue.put(("error", f"收藏夹整理失败：{exc}"))
+        finally:
+            self._msg_queue.put(("organize_done", None))
 
     # ------------------------------------------------------------------ #
     # AI 设置                                                            #

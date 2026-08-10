@@ -125,6 +125,33 @@ class BiliClient:
     def uid(self) -> str:
         return self.cookies.get("DedeUserID", "")
 
+    @property
+    def csrf(self) -> str:
+        """bili_jct，写接口（csrf）认证用。"""
+        return self.cookies.get("bili_jct", "")
+
+    def _post(self, url: str, data: Optional[dict] = None, **kwargs) -> dict:
+        """带限流与 csrf 的 POST，返回响应中的 data 字段。"""
+        kwargs.setdefault("timeout", 20)
+        if self.request_delay > 0:
+            with self._throttle:
+                gap = time.time() - self._last_request
+                if gap < self.request_delay:
+                    time.sleep(self.request_delay - gap)
+                self._last_request = time.time()
+        body = dict(data or {})
+        if "csrf" not in body and self.csrf:
+            body["csrf"] = self.csrf
+        resp = self._session.post(url, data=body, **kwargs)
+        try:
+            resp_data = resp.json()
+        except ValueError as exc:
+            raise BilibiliError(f"接口返回非 JSON：{url} ({resp.status_code})") from exc
+        if resp_data.get("code", 0) != 0:
+            raise BilibiliError(
+                f"写操作失败 code={resp_data.get('code')}：{resp_data.get('message', '')} ({url})")
+        return resp_data.get("data") or {}
+
     def _get(self, url: str, params: Optional[dict] = None, **kwargs) -> dict:
         """带限流与统一错误处理的 GET，返回响应中的 data 字段（内层业务数据）。"""
         raw = self._get_raw(url, params=params, **kwargs)
@@ -309,3 +336,97 @@ class BiliClient:
             "pubdate": data.get("pubdate", 0),
             "owner_name": (data.get("owner") or {}).get("name", ""),
         }
+
+    # ------------------------------------------------------------------ #
+    # 写操作：按 AI 分类结果整理收藏夹                                     #
+    # 注意：写接口一次只能操作 1 个视频（1 个 rid），且 B站对批量操作有风控，   #
+    # 必须慢速限流（request_delay）与分批。                                  #
+    # ------------------------------------------------------------------ #
+    def create_folder(self, title: str, privacy: int = 0) -> int:
+        """创建收藏夹，返回 media_id。重名时返回现有 id。"""
+        # 先查重：已存在同名收藏夹则直接返回其 id
+        for f in self.get_favorite_folders():
+            if f.title == title:
+                self._log(f"收藏夹「{title}」已存在，复用 id={f.id}")
+                return f.id
+        if not self.csrf:
+            raise BilibiliError("缺少 bili_jct，无法执行写操作（请重新扫码登录）")
+        data = self._post("https://api.bilibili.com/x/v3/fav/folder/add",
+                          data={"title": title, "privacy": privacy})
+        media_id = data.get("id") or 0
+        if not media_id:
+            raise BilibiliError(f"创建收藏夹「{title}」失败：返回无 id")
+        self._log(f"已创建收藏夹「{title}」（id={media_id}）")
+        return media_id
+
+    def move_video_to_folder(self, aid: int, add_media_id: int,
+                             del_media_id: Optional[int] = None) -> None:
+        """把单个视频加入目标收藏夹（可选：从原收藏夹移除）。
+
+        :param aid: 视频 aid
+        :param add_media_id: 目标收藏夹 media_id
+        :param del_media_id: 可选，原收藏夹 media_id（移动时传）
+        """
+        if not self.csrf:
+            raise BilibiliError("缺少 bili_jct，无法执行写操作（请重新扫码登录）")
+        data = {
+            "rid": aid,
+            "type": 2,
+            "add_media_ids": add_media_id,
+            "del_media_ids": del_media_id or "",
+        }
+        self._post("https://api.bilibili.com/x/v3/fav/resource/deal", data=data)
+
+    def apply_classification(self, videos: list[dict],
+                             categorized: dict[str, list[dict]],
+                             source_media_id: int,
+                             progress_cb: Optional[Callable[[int, int], None]] = None,
+                             cancel_event: Optional[threading.Event] = None) -> dict:
+        """按 AI 分类结果整理收藏夹：为每个分类创建收藏夹并把视频移入。
+
+        :param videos: 已加载的原始视频列表 [{bvid, aid, title, ...}]
+        :param categorized: AI 分类结果 {分类名: [视频dict]}
+        :param source_media_id: 原收藏夹 media_id（移动后从中移除）
+        :return: {分类名: 移动成功数}
+        """
+        if not self.csrf:
+            raise BilibiliError("缺少 bili_jct，无法执行写操作（请重新扫码登录）")
+        # bvid -> aid 映射
+        aid_map = {v.get("bvid"): v.get("aid") for v in videos if v.get("aid")}
+
+        # 1) 为每个非空分类创建/复用收藏夹
+        folder_ids: dict[str, int] = {}
+        for cat, items in categorized.items():
+            if not items:
+                continue
+            try:
+                folder_ids[cat] = self.create_folder(cat)
+            except BilibiliError as exc:
+                self._log(f"创建分类夹「{cat}」失败：{exc}，跳过该分类")
+
+        # 2) 逐个移动视频（慢速限流）
+        total = sum(len(items) for items in categorized.values())
+        done = 0
+        moved: dict[str, int] = {}
+        for cat, items in categorized.items():
+            if not items or cat not in folder_ids:
+                continue
+            target_id = folder_ids[cat]
+            ok = 0
+            for v in items:
+                if cancel_event and cancel_event.is_set():
+                    self._log("已取消移动")
+                    break
+                aid = aid_map.get(v.get("bvid"))
+                if not aid:
+                    continue
+                try:
+                    self.move_video_to_folder(aid, target_id, source_media_id)
+                    ok += 1
+                except BilibiliError as exc:
+                    self._log(f"移动 {v.get('title', '')[:20]} 失败：{exc}")
+                done += 1
+                if progress_cb:
+                    progress_cb(done, total)
+            moved[cat] = ok
+        return moved
