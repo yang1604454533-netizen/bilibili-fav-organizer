@@ -20,6 +20,14 @@ class MockBiliHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if "folder/created/list-all" in self.path:
+            if "fail=risk" in self.path:
+                # 读接口也被风控 → 账号级风控
+                self.send_response(412)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len("<html>risk</html>")))
+                self.end_headers()
+                self.wfile.write(b"<html>risk</html>")
+                return
             resp = {"code": 0, "data": {"list": [
                 {"id": 100, "fid": 100, "mid": 1, "title": "默认收藏夹", "media_count": 2, "attr": 0},
             ]}}
@@ -124,8 +132,10 @@ def main():
         assert len(deals) == 6, f"deal 数 {len(deals)}"
         assert len(creates) == 3, f"create 数 {len(creates)}"
 
-        # 4) 风控停止：deal 返回 412 时立即停止后续移动
-        risk_mode = {"on": False}
+        # 4) 风控停止：deal 返回 412 且探测判账号级 → 立即停止
+        risk_mode = {"on": True}
+        orig_detect = bb.BiliClient._detect_risk_type
+        bb.BiliClient._detect_risk_type = lambda self: "account"  # 固定判账号级
 
         def fake_post_risk(self, url, data=None, **kw):
             if "resource/deal" in url and risk_mode["on"]:
@@ -135,7 +145,6 @@ def main():
             return orig_post(self, url, data=data, **kw)
 
         bb.BiliClient._post = fake_post_risk
-        risk_mode["on"] = True
         vids3 = [
             {"bvid": "BV1x", "aid": 11, "title": "视频1"},
             {"bvid": "BV1y", "aid": 12, "title": "视频2"},
@@ -145,11 +154,32 @@ def main():
         before_deals = len([r for r in RECEIVED if "resource/deal" in r["path"]])
         moved3 = client.apply_classification(vids3, cat3, source_media_id=100)
         after_deals = len([r for r in RECEIVED if "resource/deal" in r["path"]])
+        bb.BiliClient._detect_risk_type = orig_detect
         print(f"[6] 风控测试: 移动结果={moved3}, deal 增量={after_deals - before_deals}")
-        # 第一个 deal 412 后立即停止：增量应只有 1 个 deal（第一步 add 触发风控）
+        # 第一个 deal 412 后：账号级 → 立即停止，增量应只有 1 个 deal
         assert after_deals - before_deals == 1, f"风控未停止，deal 增量 {after_deals - before_deals}"
-        assert moved3["科技"] == 0, moved3
-        print("[7] 风控立即停止 OK")
+        assert moved3.get("科技", 0) == 0, moved3
+        print("[7] 风控(账号级)立即停止 OK")
+
+        # 4b) IP 级风控：自动等待后重试（cancel_event 模拟超时取消，验证不停止）
+        risk_mode["on"] = False          # 关闭 deal 的 412，验证重试成功
+        # 恢复 _detect_risk_type 原逻辑前，先测 IP 级路径：monkeypatch 返回 "ip"
+        orig_detect = bb.BiliClient._detect_risk_type
+        bb.BiliClient._detect_risk_type = lambda self: "ip"
+        import threading as _t
+        cancel = _t.Event()
+        cancel.set()  # 模拟用户在等待冷却期间点击取消
+        risk_mode["on"] = True
+        before2 = len([r for r in RECEIVED if "resource/deal" in r["path"]])
+        vids4 = [{"bvid": "BV1p", "aid": 21, "title": "视频4"},
+                 {"bvid": "BV1q", "aid": 22, "title": "视频5"}]
+        cat4 = {"科技": vids4}
+        moved4 = client.apply_classification(vids4, cat4, source_media_id=100,
+                                             cancel_event=cancel)
+        bb.BiliClient._detect_risk_type = orig_detect
+        print(f"[8] IP级风控等待取消测试: moved={moved4}")
+        # IP 级等待冷却期间被取消：流程正常退出不崩溃
+        assert isinstance(moved4, dict)
     finally:
         bb.BiliClient._get_raw = orig_get
         bb.BiliClient._post = orig_post

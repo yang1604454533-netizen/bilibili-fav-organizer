@@ -136,13 +136,18 @@ class BiliClient:
         return self.cookies.get("bili_jct", "")
 
     def _post(self, url: str, data: Optional[dict] = None, **kwargs) -> dict:
-        """带限流与 csrf 的 POST，返回响应中的 data 字段。"""
+        """带限流与 csrf 的 POST，返回响应中的 data 字段。
+
+        限流间隔在 [base, base*2] 内随机，模拟真人操作节奏降低风控概率。
+        """
         kwargs.setdefault("timeout", 20)
         if self.request_delay > 0:
             with self._throttle:
                 gap = time.time() - self._last_request
-                if gap < self.request_delay:
-                    time.sleep(self.request_delay - gap)
+                import random as _rnd
+                wait = self.request_delay * _rnd.uniform(1.0, 2.0)  # 随机化：模拟真人
+                if gap < wait:
+                    time.sleep(wait - gap)
                 self._last_request = time.time()
         body = dict(data or {})
         if "csrf" not in body and self.csrf:
@@ -458,44 +463,66 @@ class BiliClient:
             except BilibiliError as exc:
                 self._log(f"创建分类夹「{cat}」失败：{exc}，跳过该分类")
 
-        # 2) 逐个移动视频（慢速限流；遇风控立即停止）
+        # 2) 分批移动视频：每批 batch 条后休息，模拟真人节奏降低风控
+        #    IP 级风控自动等待后重试剩余，账号级风控才停止
+        batch = 15                       # 每批条数（超过易触发窗口计数）
+        batch_pause = 45                 # 批间休息秒数
+        ip_cooldown = 300                # IP 风控冷却秒数（5 分钟）
         total = sum(len(items) for items in categorized.values())
         done = 0
         moved: dict[str, int] = {}
         risk_hit = False
+        # 展平所有待移动项（保持分类归属）
+        pending: list[tuple[str, dict]] = []  # (cat, video)
         for cat, items in categorized.items():
-            if risk_hit:
-                break
             if not items or cat not in folder_ids:
                 continue
-            target_id = folder_ids[cat]
-            ok = 0
             for v in items:
-                if cancel_event and cancel_event.is_set():
-                    self._log("已取消移动")
-                    break
-                aid = aid_map.get(v.get("bvid"))
-                if not aid:
-                    continue
-                try:
-                    self.move_video_to_folder(aid, target_id, source_media_id)
-                    ok += 1
-                except BilibiliError as exc:
-                    self._log(f"移动 {v.get('title', '')[:20]} 失败：{exc}")
-                    if getattr(exc, "is_risk", False):
-                        risk_type = self._detect_risk_type()
-                        if risk_type == "ip":
-                            self._log("检测到 IP 级风控，已停止后续移动。"
-                                      "请等待约 10 分钟冷却后重试，或换手机热点再试。")
-                            exc.risk_type = "ip"
-                        else:
-                            self._log("检测到账号级风控，已停止后续移动。"
-                                      "请等待约 1 小时冷却后再试，期间避免任何批量写操作。")
-                            exc.risk_type = "account"
-                        risk_hit = True
-                        break
+                pending.append((cat, v))
+        in_batch = 0
+        for cat, v in pending:
+            if risk_hit:
+                break
+            if cancel_event and cancel_event.is_set():
+                self._log("已取消移动")
+                break
+            aid = aid_map.get(v.get("bvid"))
+            if not aid:
                 done += 1
                 if progress_cb:
                     progress_cb(done, total)
-            moved[cat] = ok
+                continue
+            # 批间休息：每完成 batch 条暂停，让风控窗口计数回落
+            if in_batch >= batch:
+                self._log(f"已完成 {batch} 条，休息 {batch_pause} 秒降低风控…")
+                if cancel_event and cancel_event.wait(batch_pause):
+                    self._log("已取消移动")
+                    break
+                in_batch = 0
+            try:
+                self.move_video_to_folder(aid, folder_ids[cat], source_media_id)
+                moved[cat] = moved.get(cat, 0) + 1
+                in_batch += 1
+            except BilibiliError as exc:
+                self._log(f"移动 {v.get('title', '')[:20]} 失败：{exc}")
+                if getattr(exc, "is_risk", False):
+                    risk_type = self._detect_risk_type()
+                    if risk_type == "ip":
+                        # IP 级：等待冷却后自动重试剩余，不中断
+                        self._log(f"IP 级风控，等待 {ip_cooldown // 60} 分钟冷却后自动重试剩余…")
+                        if cancel_event and cancel_event.wait(ip_cooldown):
+                            self._log("已取消移动")
+                            break
+                        self._log("冷却结束，继续移动剩余视频…")
+                        in_batch = 0
+                        continue
+                    # 账号级：必须停止
+                    self._log("检测到账号级风控，已停止后续移动。"
+                              "请等待约 1 小时冷却后再试，期间避免任何批量写操作。")
+                    exc.risk_type = "account"
+                    risk_hit = True
+                    break
+            done += 1
+            if progress_cb:
+                progress_cb(done, total)
         return moved
