@@ -53,9 +53,9 @@ _CONTEXT_PROMPT = """你是一个视频分类助手。请把下面的 B站视频
 - 只输出一个 JSON 对象，不要输出任何其他文字、解释或 Markdown 代码块。
 - JSON 格式：{{"items": [{{"bvid": "...", "category": "分类名"}}]}}
 - 每条视频必须对应一条结果，bvid 必须原样返回。
-- 必须根据标题和简介的实际内容判断，选择最贴切的分类；严禁默认归"其他"。
-- 只有确实无法归入任何分类时，才使用"其他"。
-- 分类名必须严格来自"可用分类"列表，不要自创分类名。
+- 必须根据标题和简介的实际内容判断，选择最贴切的分类；不要图省事默认丢到列表最后一项。
+- 任何情况下都必须从上面的「可用分类」里原样选一个，严禁自创、翻译、改写或简写分类名。
+- 只有确实无法归入前面任何分类时，才使用「可用分类」列表中的最后一项。
 
 待分类视频：
 {items}
@@ -128,8 +128,9 @@ class AIClassifier:
                 self._bump_progress(done, total)
 
         result: dict[str, list[dict]] = {}
+        fallback = self._fallback_category()
         for v in videos:
-            cat = cat_map.get(v["bvid"], "其他")
+            cat = cat_map.get(v["bvid"], fallback)
             result.setdefault(cat, []).append(v)
         # 保持分类顺序与配置一致
         ordered = {}
@@ -180,36 +181,52 @@ class AIClassifier:
             # 兜底：AI 结果不可用时按标题/简介关键词粗分类
             mapping = self._heuristic_classify(batch)
         else:
-            # 部分结果：对 AI 未覆盖的条目逐条启发式兜底，避免归"其他"
+            # 部分结果：对 AI 未覆盖的条目逐条启发式兜底，避免整批落到兜底类
             heu = self._heuristic_classify(batch)
+            fallback = self._fallback_category()
             for v in batch:
                 if v["bvid"] not in mapping:
-                    mapping[v["bvid"]] = heu.get(v["bvid"], "其他")
-        # 仍缺失的 bvid 归入"其他"
+                    mapping[v["bvid"]] = heu.get(v["bvid"], fallback)
+        # 仍缺失的 bvid 归入兜底分类
+        fallback = self._fallback_category()
         for v in batch:
-            mapping.setdefault(v["bvid"], "其他")
+            mapping.setdefault(v["bvid"], fallback)
         return mapping
 
     # ------------------------------------------------------------------ #
     # 本地启发式兜底：AI 结果不可用时，按标题/简介关键词粗分类            #
     # ------------------------------------------------------------------ #
     def _heuristic_classify(self, batch: list[dict]) -> dict[str, str]:
-        mapping = {}
+        """本地启发式兜底。规则按分类名匹配，只对配置里真实存在的分类生效。
+
+        规则表刻意与用户可配置的分类名解耦：先按关键词给出候选分类名，
+        再用配置校验，凡不在配置里的候选一律丢弃，最终落到兜底分类。
+        """
+        mapping: dict[str, str] = {}
+        # 顺序即优先级，越具体的越靠前，避免被泛化词抢先命中。
         rules = [
-            ("科技", ["科技", "手机", "电脑", "数码", "评测", "芯片", "AI", "人工智能", "软件", "硬件", "编程", "代码", "开源", "机器", "新能源", "电动车", "汽车", "科普"]),
-            ("美食", ["美食", "吃", "菜谱", "做饭", "烹饪", "料理", "探店", "小吃", "餐厅", "零食", "烘焙", "厨房", "做法", "食谱"]),
-            ("音乐", ["音乐", "歌", "吉他", "钢琴", "乐器", "演唱", "翻唱", "现场", "乐队", "专辑", "音综", "乐评"]),
-            ("体育", ["体育", "足球", "篮球", "球", "比赛", "赛事", "健身", "跑步", "运动", "nba", "cba", "世界杯", "奥运"]),
-            ("游戏", ["游戏", "手游", "网游", "主机", "ps5", "switch", "steam", "电玩", "开黑", "电竞", "攻略", "吃鸡", "王者", "原神", "我的世界", "minecraft"]),
-            ("影视", ["电影", "影评", "电视剧", "剧集", "美剧", "日剧", "韩剧", "番外", "预告", "影视", "解说", "悬疑"]),
-            ("知识", ["知识", "学习", "课程", "教程", "讲解", "历史", "地理", "物理", "数学", "化学", "生物", "心理", "经济", "哲学", "纪录片", "干货", "方法论"]),
-            ("动漫", ["动漫", "动画", "二次元", "番剧", "漫画", "手办", "cos", "cv", "声优", "op", "ed"]),
-            ("生活", ["生活", "日常", "vlog", "探店", "旅行", "穿搭", "美妆", "家居", "宠物", "收纳", "手工", "记录"]),
+            ("AI工具与模型", ["ai", "人工智能", "大模型", "gpt", "llm", "deepseek", "chatgpt", "claude", "gemini", "qwen", "agent", "智能体", "提示词", "prompt", "ollama", "lm studio", "cursor", "copilot", "mcp", "api", "模型"]),
+            ("游戏开发", ["游戏引擎", "unity", "unreal", "ue5", "ue4", "godot", "图形学", "opengl", "vulkan", "shader", "独立游戏", "游戏编程", "做游戏", "游戏制作", "scion"]),
+            ("编程与开发", ["java", "python", "c++", "c语言", "rust", "golang", "前端", "后端", "编程", "代码", "框架", "算法", "数据结构", "数据库", "sql", "redis", "linux", "docker", "git", "逆向", "嵌入式", "单片机", "程序员", "架构", "编译"]),
+            ("开源与效率工具", ["开源", "github", "插件", "工具", "软件", "脚本", "笔记", "obsidian", "效率", "自建", "nas", "部署", "app", "神器", "windows", "美化"]),
+            ("数码硬件外设", ["显卡", "cpu", "gpu", "装机", "笔记本", "显示器", "键盘", "鼠标", "耳机", "手柄", "充电", "充电宝", "硬盘", "路由器", "手机", "平板", "相机", "手表", "佳明", "garmin", "外设", "开箱", "拆机", "评测"]),
+            ("游戏娱乐", ["游戏", "手游", "网游", "主机", "ps5", "switch", "steam", "电玩", "开黑", "电竞", "攻略", "吃鸡", "王者", "原神", "minecraft", "我的世界", "音游", "maimai", "phigros", "arcaea", "存档", "实况", "通关"]),
+            ("健身与体态", ["健身", "增肌", "减脂", "哑铃", "训练", "跟练", "腹肌", "跑步", "运动", "体态", "圆肩", "驼背", "脊柱", "康复", "拉伸", "器械", "卧推", "深蹲"]),
+            ("穿搭颜值与好物", ["穿搭", "发型", "护肤", "美妆", "配镜", "眼镜", "edc", "好物", "翻包", "男装", "鞋子", "衣服", "颜值", "香水"]),
+            ("宿舍与校园生活", ["宿舍", "室友", "准大一", "大学", "校园", "军训", "开学", "图书馆", "大学生"]),
+            ("动漫与番剧", ["动漫", "动画", "番剧", "新番", "漫画", "手办", "cos", "声优", "mad", "amv", "本子"]),
+            ("影视与剧集解说", ["电影", "影评", "电视剧", "剧集", "美剧", "日剧", "韩剧", "预告", "影视", "解说", "混剪", "reaction", "悬疑"]),
+            ("音乐", ["音乐", "歌曲", "歌", "吉他", "钢琴", "乐器", "演唱", "翻唱", "现场", "乐队", "专辑", "乐理", "bgm", "纯音乐"]),
+            ("学习与考试", ["学习", "课程", "教程", "讲解", "考试", "考研", "英语", "日语", "背单词", "anki", "笔记", "方法论", "科普", "数学", "物理", "化学", "历史", "政治", "纪录片"]),
+            ("二次元亚文化", ["男娘", "伪娘", "女装", "正太", "萝莉", "假小子", "二次元", "vtb", "虚拟主播"]),
+            ("ASMR助眠", ["asmr", "助眠", "白噪音", "掏耳", "解压音", "音声"]),
+            ("生活其他", ["生活", "日常", "vlog", "美食", "吃", "做饭", "做法", "菜谱", "食谱", "料理", "烹饪", "探店", "小吃", "餐厅", "厨房", "零食", "烘焙", "旅行", "旅游", "宠物", "家居", "收纳", "手工", "记录", "整活", "梗", "好物"]),
         ]
         valid = set(self.config.categories)
+        fallback = self._fallback_category()
         for v in batch:
             text = f"{v.get('title', '')} {v.get('intro', '')}".lower()
-            cat = "其他"
+            cat = fallback
             for c, kws in rules:
                 if c not in valid:
                     continue
@@ -312,10 +329,22 @@ class AIClassifier:
             return mapping
         raise ValueError("返回内容无法解析为分类结果")
 
+    def _fallback_category(self) -> str:
+        """兜底分类名：取配置里最后一个分类。
+
+        原实现硬编码 "其他"，但用户自定义的分类表里可能没有叫「其他」的项
+        （例如末项是「失效与待定」）。若继续硬编码，AI 判不出的条目会落到
+        一个不存在的分类上，整理阶段没有对应收藏夹可建，视频会被静默跳过。
+        取配置末项可保证兜底目标一定存在；配置为空时退回 "其他"。
+        """
+        cats = list(self.config.categories or [])
+        return cats[-1] if cats else "其他"
+
     def _extract_mapping(self, items: list) -> dict[str, str]:
         """从 items 列表提取 {bvid: category}，容忍缺失/非法分类。"""
         mapping = {}
         valid_cats = set(self.config.categories)
+        fallback = self._fallback_category()
         for it in items:
             if not isinstance(it, dict):
                 continue
@@ -324,7 +353,7 @@ class AIClassifier:
             if not bvid or not cat:
                 continue
             if cat not in valid_cats:
-                cat = "其他"
+                cat = fallback
             mapping[bvid] = cat
         return mapping
 
@@ -332,6 +361,7 @@ class AIClassifier:
         """正则逐条提取 bvid 与 category，容忍单引号/中文引号/尾逗号等 AI 输出缺陷。"""
         mapping = {}
         valid_cats = set(self.config.categories)
+        fallback = self._fallback_category()
         # 匹配 "bvid": "BVxxx", "category": "xxx" （键/值均可带引号变体）
         pat = re.compile(
             r'''["']bvid["']\s*:\s*["']([A-Za-z0-9]+)["']\s*,\s*["']category["']\s*:\s*["']([^"']+)["']'''
@@ -339,5 +369,5 @@ class AIClassifier:
         for m in pat.finditer(text):
             bvid, cat = m.group(1), m.group(2).strip()
             if bvid and cat:
-                mapping[bvid] = cat if cat in valid_cats else "其他"
+                mapping[bvid] = cat if cat in valid_cats else fallback
         return mapping

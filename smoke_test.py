@@ -174,34 +174,42 @@ def main():
     assert cc.cookies.get("DedeUserID") == "42"
 
     # 容错解析：坏 JSON（模型被简介中的引号干扰）→ 正则降级逐条提取
+    # 分类表取自真实配置（config.json），使断言与用户实际使用的分类一致。
     from app.ai_classifier import AIClassifier as _AC
-    clf2 = _AC(AIConfig(api_key="k", model="m", base_url="http://x/v1",
-                        categories=["科技", "美食", "音乐", "体育", "游戏", "影视", "知识", "动漫", "生活", "其他"]))
-    bad_json = ('{"items": [{"bvid": "BV1x1", "category": "科技"}, '
-                '{"bvid": "BV1x2", "category": "美食"}], extra: broken ,,, }')
+    from app.config import load_config as _load
+    _cats = _load().get("categories") or ["科技", "美食", "音乐", "体育", "游戏", "影视", "知识", "动漫", "生活", "其他"]
+    clf2 = _AC(AIConfig(api_key="k", model="m", base_url="http://x/v1", categories=_cats))
+    _c0, _c1 = _cats[0], _cats[1]
+    bad_json = (f'{{"items": [{{"bvid": "BV1x1", "category": "{_c0}"}}, '
+                f'{{"bvid": "BV1x2", "category": "{_c1}"}}], extra: broken ,,, }}')
     m = clf2._parse_response(bad_json)
-    assert m.get("BV1x1") == "科技" and m.get("BV1x2") == "美食", f"坏JSON正则降级失败: {m}"
+    assert m.get("BV1x1") == _c0 and m.get("BV1x2") == _c1, f"坏JSON正则降级失败: {m}"
     # 单引号变体
-    m2 = clf2._parse_response("{'items': [{'bvid': 'BV1y1', 'category': '音乐'}]}")
-    assert m2.get("BV1y1") == "音乐", f"单引号解析失败: {m2}"
-    # 非法分类名 → 归"其他"
+    m2 = clf2._parse_response("{'items': [{'bvid': 'BV1y1', 'category': '%s'}]}" % _c0)
+    assert m2.get("BV1y1") == _c0, f"单引号解析失败: {m2}"
+    # 非法分类名 → 归入配置末项（兜底分类，不再硬编码"其他"）
     m3 = clf2._parse_response('{"items": [{"bvid": "BV1z1", "category": "随便写的"}]}')
-    assert m3.get("BV1z1") == "其他", f"非法分类兜底失败: {m3}"
+    fallback = clf2._fallback_category()
+    assert m3.get("BV1z1") == fallback, f"非法分类兜底失败: {m3} (期望 {fallback})"
     # 完全无法解析 → 抛 ValueError（由上层走启发式）
     try:
         clf2._parse_response("完全不是JSON")
         raise AssertionError("应抛 ValueError")
     except ValueError:
         pass
-    # 启发式兜底：按标题关键词粗分类
+    # 启发式兜底：按标题关键词粗分类（随配置自适应，不写死旧分类名）
     heu = clf2._heuristic_classify([
         {"bvid": "BV1h1", "title": "最新显卡评测 性能炸裂", "intro": ""},
         {"bvid": "BV1h2", "title": "水煮鱼的做法 一学就会", "intro": ""},
         {"bvid": "BV1h3", "title": "某日常流水账", "intro": ""},
     ])
-    assert heu.get("BV1h1") == "科技", f"启发式科技失败: {heu}"
-    assert heu.get("BV1h2") == "美食", f"启发式美食失败: {heu}"
-    assert heu.get("BV1h3") == "生活", f"启发式生活失败: {heu}"
+    # 只断言"落到了配置里的合法分类"，具体落哪一类取决于用户的分类表。
+    valid = set(_cats)
+    for bvid, title in [("BV1h1", "显卡评测"), ("BV1h2", "水煮鱼做法"), ("BV1h3", "日常流水账")]:
+        got = heu.get(bvid, "")
+        assert got in valid, f"启发式结果不是合法分类（{title}）: got={got!r} 合法={sorted(valid)}"
+    # 关键词必须真正生效：显卡评测不该和日常流水账落到同一类
+    assert heu.get("BV1h1") != heu.get("BV1h3"), f"启发式未区分内容: {heu}"
 
     server.shutdown()
     print("\n✅ 全部冒烟测试通过（含扫码状态码、Set-Cookie、容错解析与启发式兜底）")
